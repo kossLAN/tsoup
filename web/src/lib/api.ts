@@ -22,12 +22,13 @@ export type Entry =
 	| { kind: 'assistant'; text: string | null; tool_calls: ToolCall[] }
 	| { kind: 'tool'; call_id: string; output: string; error: boolean; diff: FileDiff | null };
 
-export type VmStatus =
+export type VmStatus = (
 	| { state: 'stopped' }
 	| { state: 'building' }
 	| { state: 'booting' }
 	| { state: 'running' }
-	| { state: 'failed'; message: string };
+	| { state: 'failed'; message: string }
+) & { built: boolean };
 
 export type SessionEvent =
 	| { type: 'snapshot'; title: string; entries: Entry[]; vm: VmStatus; busy: boolean }
@@ -69,6 +70,10 @@ export async function startTurn(id: string, content: string): Promise<void> {
 
 export async function cancelTurn(id: string): Promise<void> {
 	await request('DELETE', `/api/sessions/${id}/turn`);
+}
+
+export async function startVm(id: string): Promise<void> {
+	await request('POST', `/api/sessions/${id}/vm`);
 }
 
 export async function destroyVm(id: string): Promise<void> {

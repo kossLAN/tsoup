@@ -113,13 +113,16 @@ impl Sessions {
         let dir = self.root.join(id.to_string());
         tokio::fs::create_dir_all(dir.join(WORKSPACE_DIR)).await?;
 
-        let session = Arc::new(Session::new(
-            id,
-            dir,
-            self.runtime.join(id.to_string()),
-            SessionData::default(),
-            Arc::clone(&self.builder),
-        ));
+        let session = Arc::new(
+            Session::new(
+                id,
+                dir,
+                self.runtime.join(id.to_string()),
+                SessionData::default(),
+                Arc::clone(&self.builder),
+            )
+            .await,
+        );
         session.persist(&*session.data.lock().await).await?;
         self.by_id.write().await.insert(id, Arc::clone(&session));
         Ok(session)
@@ -149,7 +152,7 @@ pub struct Session {
 }
 
 impl Session {
-    fn new(
+    async fn new(
         id: Uuid,
         dir: PathBuf,
         runtime: PathBuf,
@@ -160,7 +163,7 @@ impl Session {
 
         Self {
             id,
-            vm: Vm::new(dir.clone(), runtime, builder, events.clone()),
+            vm: Vm::new(dir.clone(), runtime, builder, events.clone()).await,
             dir,
             data: Mutex::new(data),
             events,
@@ -175,7 +178,7 @@ impl Session {
         builder: Arc<Builder>,
     ) -> Result<Self, SessionError> {
         let data = serde_json::from_slice(&tokio::fs::read(dir.join(SESSION_FILE)).await?)?;
-        Ok(Self::new(id, dir, runtime, data, builder))
+        Ok(Self::new(id, dir, runtime, data, builder).await)
     }
 
     pub fn workspace(&self) -> PathBuf {

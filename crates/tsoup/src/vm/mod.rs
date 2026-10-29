@@ -25,12 +25,19 @@ const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(tag = "state", rename_all = "snake_case")]
-pub enum VmStatus {
+pub enum VmState {
     Stopped,
     Building,
     Booting,
     Running,
     Failed { message: String },
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct VmStatus {
+    #[serde(flatten)]
+    pub state: VmState,
+    pub built: bool,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -65,18 +72,25 @@ pub struct Vm {
 }
 
 impl Vm {
-    pub fn new(
+    pub async fn new(
         dir: PathBuf,
         runtime: PathBuf,
         builder: Arc<Builder>,
         events: broadcast::Sender<Event>,
     ) -> Self {
+        let built = tokio::fs::try_exists(dir.join(RUNNER_LINK))
+            .await
+            .unwrap_or(false);
+
         Self {
             dir,
             runtime,
             builder,
             running: Mutex::new(None),
-            status: watch::Sender::new(VmStatus::Stopped),
+            status: watch::Sender::new(VmStatus {
+                state: VmState::Stopped,
+                built,
+            }),
             events,
         }
     }
@@ -92,15 +106,15 @@ impl Vm {
     pub async fn create(&self, module: Option<String>) -> Result<(), VmError> {
         let mut running = self.running.lock().await;
 
-        self.set_status(VmStatus::Building);
+        self.set_state(VmState::Building);
 
         let runner = match self.builder.build(&self.dir, module).await {
             Ok(runner) => runner,
             Err(error) => {
-                self.set_status(if running.is_some() {
-                    VmStatus::Running
+                self.set_state(if running.is_some() {
+                    VmState::Running
                 } else {
-                    VmStatus::Failed {
+                    VmState::Failed {
                         message: error.to_string(),
                     }
                 });
@@ -108,6 +122,7 @@ impl Vm {
             },
         };
 
+        self.update(|status| status.built = true);
         stop(&mut running).await;
         self.boot(&mut running, &runner).await
     }
@@ -122,6 +137,7 @@ impl Vm {
         let runner = self.dir.join(RUNNER_LINK);
 
         if !tokio::fs::try_exists(&runner).await? {
+            self.update(|status| status.built = false);
             return Err(VmError::NotBuilt);
         }
 
@@ -129,16 +145,16 @@ impl Vm {
     }
 
     async fn boot(&self, running: &mut Option<Running>, runner: &Path) -> Result<(), VmError> {
-        self.set_status(VmStatus::Booting);
+        self.set_state(VmState::Booting);
 
         match Running::launch(&self.dir, &self.runtime, runner).await {
             Ok(launched) => {
                 *running = Some(launched);
-                self.set_status(VmStatus::Running);
+                self.set_state(VmState::Running);
                 Ok(())
             },
             Err(error) => {
-                self.set_status(VmStatus::Failed {
+                self.set_state(VmState::Failed {
                     message: error.to_string(),
                 });
                 Err(error)
@@ -156,20 +172,20 @@ impl Vm {
             _ => {},
         }
 
-        self.set_status(VmStatus::Stopped);
+        self.set_state(VmState::Stopped);
     }
 
     pub async fn reconcile(&self) {
         let running = self.running.lock().await;
 
         if matches!(
-            *self.status.borrow(),
-            VmStatus::Building | VmStatus::Booting
+            self.status.borrow().state,
+            VmState::Building | VmState::Booting
         ) {
-            self.set_status(if running.is_some() {
-                VmStatus::Running
+            self.set_state(if running.is_some() {
+                VmState::Running
             } else {
-                VmStatus::Stopped
+                VmState::Stopped
             });
         }
     }
@@ -182,7 +198,7 @@ impl Vm {
             Ok(response) => Ok(response),
             Err(error) => {
                 stop(&mut running).await;
-                self.set_status(VmStatus::Failed {
+                self.set_state(VmState::Failed {
                     message: error.to_string(),
                 });
                 Err(error)
@@ -190,9 +206,15 @@ impl Vm {
         }
     }
 
-    fn set_status(&self, status: VmStatus) {
-        self.status.send_replace(status.clone());
-        let _ = self.events.send(Event::Vm { status });
+    fn set_state(&self, state: VmState) {
+        self.update(|status| status.state = state);
+    }
+
+    fn update(&self, change: impl FnOnce(&mut VmStatus)) {
+        self.status.send_modify(change);
+        let _ = self.events.send(Event::Vm {
+            status: self.status(),
+        });
     }
 }
 

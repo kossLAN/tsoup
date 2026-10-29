@@ -4,7 +4,7 @@ import { sessions } from './sessions.svelte';
 export class Session {
 	title = $state('');
 	entries = $state<Entry[]>([]);
-	vm = $state<VmStatus>({ state: 'stopped' });
+	vm = $state<VmStatus>({ state: 'stopped', built: false });
 	busy = $state(false);
 	failure = $state<string | null>(null);
 	boots = $state(0);

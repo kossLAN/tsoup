@@ -3,7 +3,6 @@
   guestAgent,
 }:
 {
-  config,
   lib,
   pkgs,
   ...
@@ -11,7 +10,14 @@
 let
   session = {
     user = "agent";
-    command = lib.getExe config.programs.sway.package;
+    command = lib.escapeShellArgs [
+      (lib.getExe' pkgs.dbus "dbus-run-session")
+      (lib.getExe' pkgs.kdePackages.kwin "kwin_wayland")
+      "--drm"
+      "--no-lockscreen"
+      "--xwayland"
+      "--exit-with-session=${lib.getExe guestAgent}"
+    ];
   };
 in
 {
@@ -79,11 +85,6 @@ in
     SUBSYSTEM=="virtio-ports", ATTR{name}=="tsoup.agent", OWNER="agent"
   '';
 
-  programs.sway = {
-    enable = lib.mkForce true;
-    extraPackages = lib.mkForce [ ];
-  };
-
   services.greetd = {
     enable = lib.mkForce true;
     settings = {
@@ -92,28 +93,11 @@ in
     };
   };
 
-  environment.sessionVariables = {
-    WLR_RENDERER = lib.mkForce "pixman";
-    WLR_NO_HARDWARE_CURSORS = lib.mkForce "1";
-  };
+  hardware.graphics.enable = lib.mkForce true;
+  programs.xwayland.enable = lib.mkForce true;
 
-  environment.etc."sway/config".text = lib.mkForce ''
-    set $mod Mod1
-
-    output * bg #161616 solid_color
-    default_border pixel 1
-    default_floating_border pixel 1
-
-    client.focused #78a9ff #78a9ff #161616 #78a9ff #78a9ff
-    client.focused_inactive #444444 #1c1c1c #96989b #444444 #444444
-    client.unfocused #444444 #161616 #96989b #444444 #444444
-
-    bindsym $mod+Return exec ${lib.getExe pkgs.foot}
-    bindsym $mod+q kill
-    bindsym $mod+f fullscreen toggle
-
-    exec ${lib.getExe guestAgent}
-  '';
-
-  environment.systemPackages = [ pkgs.foot ];
+  environment.systemPackages = [
+    pkgs.foot
+    pkgs.kdePackages.breeze
+  ];
 }

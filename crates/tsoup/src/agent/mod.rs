@@ -11,7 +11,7 @@ const SYSTEM_PROMPT: &str = "You are a coding agent working in a session workspa
 The workspace is at /workspace and persists for the whole session. \
 read_file, write_file and edit_file work on the workspace directly and need no VM. \
 To run anything, call create_vm with a NixOS module that installs what you need, then use shell. \
-The VM is a NixOS microVM running a sway Wayland session that the user watches live, \
+The VM is a NixOS microVM running a KWin Wayland session that the user watches live, \
 so graphical programs you start with shell in the background appear on their screen. \
 The VM is ephemeral: everything outside /workspace is lost when it is destroyed or replaced. \
 Calling create_vm again rebuilds the VM from a new module, so add packages that way \

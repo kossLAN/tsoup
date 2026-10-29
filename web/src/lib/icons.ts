@@ -7,6 +7,7 @@ export { default as GearSixIcon } from 'phosphor-svelte/lib/GearSixIcon';
 export { default as MonitorIcon } from 'phosphor-svelte/lib/MonitorIcon';
 export { default as PaperPlaneRightIcon } from 'phosphor-svelte/lib/PaperPlaneRightIcon';
 export { default as PencilSimpleIcon } from 'phosphor-svelte/lib/PencilSimpleIcon';
+export { default as PlayIcon } from 'phosphor-svelte/lib/PlayIcon';
 export { default as PlusIcon } from 'phosphor-svelte/lib/PlusIcon';
 export { default as PowerIcon } from 'phosphor-svelte/lib/PowerIcon';
 export { default as SidebarSimpleIcon } from 'phosphor-svelte/lib/SidebarSimpleIcon';

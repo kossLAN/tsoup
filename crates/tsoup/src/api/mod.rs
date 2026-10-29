@@ -57,7 +57,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions/{id}/events", get(events))
         .route("/api/sessions/{id}/turns", post(start_turn))
         .route("/api/sessions/{id}/turn", delete(cancel_turn))
-        .route("/api/sessions/{id}/vm", delete(destroy_vm))
+        .route("/api/sessions/{id}/vm", post(start_vm).delete(destroy_vm))
         .route("/api/sessions/{id}/display", get(display::display))
         .fallback(web::serve)
         .with_state(state)
@@ -136,6 +136,21 @@ async fn cancel_turn(
 ) -> Result<StatusCode, ApiError> {
     state.session(id).await?.cancel_turn().await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn start_vm(
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    let session = state.session(id).await?;
+
+    tokio::spawn(async move {
+        if let Err(error) = session.vm.run().await {
+            tracing::warn!(%id, %error, "starting a VM");
+        }
+    });
+
+    Ok(StatusCode::ACCEPTED)
 }
 
 async fn destroy_vm(

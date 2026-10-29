@@ -1,10 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { cancelTurn, destroyVm, getSettings, startTurn } from '$lib/api';
+	import { cancelTurn, destroyVm, getSettings, startTurn, startVm } from '$lib/api';
 	import Composer from '$lib/components/Composer.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
 	import VmPane from '$lib/components/VmPane.svelte';
-	import { MonitorIcon } from '$lib/icons';
+	import { MonitorIcon, PlayIcon } from '$lib/icons';
 	import { Session } from '$lib/session.svelte';
 	import { onMount } from 'svelte';
 	import { cubicOut } from 'svelte/easing';
@@ -20,6 +20,9 @@
 	});
 
 	const active = $derived(session.vm.state !== 'stopped');
+	const startable = $derived(
+		session.vm.built && (session.vm.state === 'stopped' || session.vm.state === 'failed')
+	);
 
 	$effect(() => {
 		const current = session;
@@ -27,7 +30,7 @@
 	});
 
 	$effect(() => {
-		if (session.vm.state === 'building') {
+		if (session.vm.state === 'building' || session.vm.state === 'booting') {
 			hidden = false;
 		}
 	});
@@ -46,6 +49,11 @@
 	<div class="chat">
 		<header>
 			<span class="title">{session.title || 'New session'}</span>
+			{#if startable}
+				<button class="icon-button" title="Start VM" onclick={() => startVm(session.id)}>
+					<PlayIcon size={16} />
+				</button>
+			{/if}
 			{#if active && hidden}
 				<button class="icon-button" title="Show VM" onclick={() => (hidden = false)}>
 					<MonitorIcon size={16} />

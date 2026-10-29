@@ -9,6 +9,7 @@
 	$effect(() => {
 		const rfb = new RFB(screen, displayUrl(page.params.id ?? ''));
 		rfb.scaleViewport = true;
+		rfb.resizeSession = true;
 		rfb.background = '#000';
 		rfb.addEventListener('connect', () => (connected = true));
 		rfb.addEventListener('disconnect', () => (connected = false));
