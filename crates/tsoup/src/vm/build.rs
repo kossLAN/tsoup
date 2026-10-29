@@ -12,7 +12,7 @@ const TSOUP_FLAKE: &str = match option_env!("TSOUP_FLAKE") {
 };
 const EMPTY_MODULE: &str = "{ }\n";
 const ENVIRONMENT_DIR: &str = "environment";
-const RUNNER_LINK: &str = "runner";
+pub(super) const RUNNER_LINK: &str = "runner";
 const ERROR_LINES: usize = 60;
 
 #[derive(Debug, thiserror::Error)]

@@ -2,6 +2,7 @@ mod create_vm;
 mod destroy_vm;
 mod edit_file;
 mod read_file;
+mod run_vm;
 mod shell;
 mod workspace;
 mod write_file;
@@ -17,6 +18,7 @@ use self::create_vm::CreateVm;
 use self::destroy_vm::DestroyVm;
 use self::edit_file::EditFile;
 use self::read_file::ReadFile;
+use self::run_vm::RunVm;
 use self::shell::Shell;
 use self::write_file::WriteFile;
 use crate::llm::{FunctionDefinition, ToolCall, ToolDefinition, ToolKind};
@@ -144,6 +146,7 @@ impl Toolbox {
     pub fn new() -> Self {
         let tools: Vec<Box<dyn ErasedTool>> = vec![
             Box::new(CreateVm),
+            Box::new(RunVm),
             Box::new(DestroyVm),
             Box::new(Shell),
             Box::new(ReadFile),

@@ -14,6 +14,7 @@ use tokio::sync::{Mutex, broadcast, watch};
 use tokio_util::codec::Framed;
 use tsoup_proto::{CodecError, Frame, HostCodec, Request, Response};
 
+use self::build::RUNNER_LINK;
 pub use self::build::{BuildError, Builder};
 use crate::session::{Event, WORKSPACE_DIR};
 
@@ -42,8 +43,12 @@ pub enum VmError {
     Exited(ExitStatus),
     #[error("the VM did not boot within {} seconds, see {CONSOLE_LOG}", BOOT_TIMEOUT.as_secs())]
     BootTimeout,
-    #[error("no VM is running, call create_vm first")]
+    #[error("no VM is running, call create_vm or run_vm first")]
     NotRunning,
+    #[error("the VM is already running")]
+    AlreadyRunning,
+    #[error("no VM has been built yet, call create_vm first")]
+    NotBuilt,
     #[error("talking to the guest agent: {0}")]
     Guest(#[from] CodecError),
     #[error("the guest agent hung up")]
@@ -104,9 +109,29 @@ impl Vm {
         };
 
         stop(&mut running).await;
+        self.boot(&mut running, &runner).await
+    }
+
+    pub async fn run(&self) -> Result<(), VmError> {
+        let mut running = self.running.lock().await;
+
+        if running.is_some() {
+            return Err(VmError::AlreadyRunning);
+        }
+
+        let runner = self.dir.join(RUNNER_LINK);
+
+        if !tokio::fs::try_exists(&runner).await? {
+            return Err(VmError::NotBuilt);
+        }
+
+        self.boot(&mut running, &runner).await
+    }
+
+    async fn boot(&self, running: &mut Option<Running>, runner: &Path) -> Result<(), VmError> {
         self.set_status(VmStatus::Booting);
 
-        match Running::launch(&self.dir, &self.runtime, &runner).await {
+        match Running::launch(&self.dir, &self.runtime, runner).await {
             Ok(launched) => {
                 *running = Some(launched);
                 self.set_status(VmStatus::Running);

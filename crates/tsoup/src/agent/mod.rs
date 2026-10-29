@@ -15,7 +15,8 @@ The VM is a NixOS microVM running a sway Wayland session that the user watches l
 so graphical programs you start with shell in the background appear on their screen. \
 The VM is ephemeral: everything outside /workspace is lost when it is destroyed or replaced. \
 Calling create_vm again rebuilds the VM from a new module, so add packages that way \
-instead of installing them imperatively.";
+instead of installing them imperatively. \
+To start a VM that is not running without rebuilding it, call run_vm.";
 
 const INTERRUPTED: &str = "the tool call was interrupted before it finished";
 

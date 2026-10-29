@@ -21,6 +21,7 @@
 		write_file: ['writing', 'wrote'],
 		edit_file: ['editing', 'edited'],
 		create_vm: ['creating a vm', 'created a vm'],
+		run_vm: ['starting the vm', 'started the vm'],
 		destroy_vm: ['destroying the vm', 'destroyed the vm']
 	};
 
