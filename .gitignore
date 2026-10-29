@@ -1,0 +1,8 @@
+/target
+/.direnv
+/result
+/.envrc
+/data
+/web/node_modules
+/web/.svelte-kit
+/web/build

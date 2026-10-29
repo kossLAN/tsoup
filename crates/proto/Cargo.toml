@@ -1,0 +1,16 @@
+[package]
+name = "tsoup-proto"
+description = "Wire types shared by the tsoup server and its guest agent"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+bytes.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio-util.workspace = true

@@ -1,0 +1,109 @@
+export type SessionSummary = {
+	id: string;
+	title: string;
+};
+
+export type ToolCall = {
+	id: string;
+	type: 'function';
+	function: {
+		name: string;
+		arguments: string;
+	};
+};
+
+export type FileDiff = {
+	path: string;
+	patch: string;
+};
+
+export type Entry =
+	| { kind: 'user'; text: string }
+	| { kind: 'assistant'; text: string | null; tool_calls: ToolCall[] }
+	| { kind: 'tool'; call_id: string; output: string; error: boolean; diff: FileDiff | null };
+
+export type VmStatus =
+	| { state: 'stopped' }
+	| { state: 'building' }
+	| { state: 'booting' }
+	| { state: 'running' }
+	| { state: 'failed'; message: string };
+
+export type SessionEvent =
+	| { type: 'snapshot'; title: string; entries: Entry[]; vm: VmStatus; busy: boolean }
+	| { type: 'entry'; entry: Entry }
+	| { type: 'turn_started' }
+	| { type: 'turn_finished' }
+	| { type: 'turn_failed'; message: string }
+	| { type: 'turn_cancelled' }
+	| { type: 'vm'; status: VmStatus };
+
+async function request(method: string, path: string, body?: unknown): Promise<Response> {
+	const response = await fetch(path, {
+		method,
+		headers: body === undefined ? undefined : { 'content-type': 'application/json' },
+		body: body === undefined ? undefined : JSON.stringify(body)
+	});
+	if (!response.ok) {
+		const failure: { error?: string } = await response.json().catch(() => ({}));
+		throw new Error(failure.error ?? `${method} ${path} failed with ${response.status}`);
+	}
+	return response;
+}
+
+export async function listSessions(): Promise<SessionSummary[]> {
+	return (await request('GET', '/api/sessions')).json();
+}
+
+export async function createSession(): Promise<SessionSummary> {
+	return (await request('POST', '/api/sessions')).json();
+}
+
+export async function deleteSession(id: string): Promise<void> {
+	await request('DELETE', `/api/sessions/${id}`);
+}
+
+export async function startTurn(id: string, content: string): Promise<void> {
+	await request('POST', `/api/sessions/${id}/turns`, { content });
+}
+
+export async function cancelTurn(id: string): Promise<void> {
+	await request('DELETE', `/api/sessions/${id}/turn`);
+}
+
+export async function destroyVm(id: string): Promise<void> {
+	await request('DELETE', `/api/sessions/${id}/vm`);
+}
+
+export function sessionEvents(id: string): EventSource {
+	return new EventSource(`/api/sessions/${id}/events`);
+}
+
+export function displayUrl(id: string): string {
+	const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
+	return `${scheme}://${location.host}/api/sessions/${id}/display`;
+}
+
+export type Settings = {
+	llm_url: string;
+	has_llm_key: boolean;
+	model: string | null;
+};
+
+export type SettingsUpdate = {
+	llm_url: string;
+	llm_key?: string;
+	model: string | null;
+};
+
+export async function getSettings(): Promise<Settings> {
+	return (await request('GET', '/api/settings')).json();
+}
+
+export async function saveSettings(update: SettingsUpdate): Promise<Settings> {
+	return (await request('PUT', '/api/settings', update)).json();
+}
+
+export async function listModels(): Promise<string[]> {
+	return (await request('GET', '/api/models')).json();
+}

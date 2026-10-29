@@ -1,0 +1,18 @@
+[package]
+name = "tsoup-guest"
+description = "The tsoup agent that runs commands inside a session microVM"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tsoup-proto.workspace = true
+
+futures-util.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true
+tracing-subscriber.workspace = true

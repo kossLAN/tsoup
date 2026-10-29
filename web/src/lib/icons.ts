@@ -1,0 +1,17 @@
+export { default as CaretRightIcon } from 'phosphor-svelte/lib/CaretRightIcon';
+export { default as CircleNotchIcon } from 'phosphor-svelte/lib/CircleNotchIcon';
+export { default as CubeIcon } from 'phosphor-svelte/lib/CubeIcon';
+export { default as FileTextIcon } from 'phosphor-svelte/lib/FileTextIcon';
+export { default as FloppyDiskIcon } from 'phosphor-svelte/lib/FloppyDiskIcon';
+export { default as GearSixIcon } from 'phosphor-svelte/lib/GearSixIcon';
+export { default as MonitorIcon } from 'phosphor-svelte/lib/MonitorIcon';
+export { default as PaperPlaneRightIcon } from 'phosphor-svelte/lib/PaperPlaneRightIcon';
+export { default as PencilSimpleIcon } from 'phosphor-svelte/lib/PencilSimpleIcon';
+export { default as PlusIcon } from 'phosphor-svelte/lib/PlusIcon';
+export { default as PowerIcon } from 'phosphor-svelte/lib/PowerIcon';
+export { default as SidebarSimpleIcon } from 'phosphor-svelte/lib/SidebarSimpleIcon';
+export { default as StopIcon } from 'phosphor-svelte/lib/StopIcon';
+export { default as TerminalWindowIcon } from 'phosphor-svelte/lib/TerminalWindowIcon';
+export { default as TrashIcon } from 'phosphor-svelte/lib/TrashIcon';
+export { default as WarningCircleIcon } from 'phosphor-svelte/lib/WarningCircleIcon';
+export { default as XIcon } from 'phosphor-svelte/lib/XIcon';

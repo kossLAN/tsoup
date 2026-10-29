@@ -1,0 +1,126 @@
+@import '@fontsource-variable/geist';
+@import '@fontsource-variable/jetbrains-mono';
+
+:root {
+	color-scheme: dark;
+
+	--window: #161616;
+	--window-text: #f2f4f8;
+	--base: #1c1c1c;
+	--alternate-base: #232323;
+	--button: #1e1e1e;
+	--accent: #78a9ff;
+	--highlighted-text: #161616;
+	--text-secondary: #96989b;
+	--light: #444444;
+	--mid: #252525;
+	--positive: #25be6a;
+	--negative: #ee5396;
+	--danger: #ff474d;
+	--hover: rgb(242 244 248 / 8%);
+	--danger-tint: rgb(255 71 77 / 14%);
+	--positive-tint: rgb(37 190 106 / 12%);
+	--negative-tint: rgb(238 83 150 / 12%);
+
+	--radius-surface: 12px;
+	--radius-control: 8px;
+	--radius-input: 6px;
+	--radius-small: 4px;
+
+	--font-ui: 'Geist Variable', sans-serif;
+	--font-mono: 'JetBrains Mono Variable', monospace;
+	--font-title: 13px;
+	--font-body: 12px;
+	--font-label: 11px;
+
+	--shadow: 0 4px 16px 2px rgb(0 0 0 / 50%);
+	--ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
+	--duration: 200ms;
+	--duration-fast: 150ms;
+}
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+}
+
+html,
+body {
+	height: 100%;
+	margin: 0;
+}
+
+body {
+	background: var(--window);
+	color: var(--window-text);
+	font-family: var(--font-ui);
+	font-size: var(--font-body);
+	-webkit-font-smoothing: antialiased;
+}
+
+button,
+textarea,
+input {
+	font: inherit;
+	color: inherit;
+}
+
+button {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	border: none;
+	border-radius: var(--radius-control);
+	background: transparent;
+	cursor: pointer;
+	transition: background var(--duration-fast) linear;
+}
+
+button:hover {
+	background: var(--hover);
+}
+
+button:disabled {
+	cursor: default;
+	opacity: 0.5;
+}
+
+button:disabled:hover {
+	background: transparent;
+}
+
+pre,
+code {
+	font-family: var(--font-mono);
+}
+
+.label {
+	font-size: var(--font-label);
+	font-weight: 500;
+	letter-spacing: 0.44px;
+	text-transform: uppercase;
+	color: var(--text-secondary);
+}
+
+.icon-button {
+	width: 26px;
+	height: 26px;
+	border-radius: 50%;
+	flex-shrink: 0;
+}
+
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+	background: var(--light);
+	border-radius: 4px;
+}
+
+::-webkit-scrollbar-track {
+	background: transparent;
+}
