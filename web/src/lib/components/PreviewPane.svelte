@@ -3,11 +3,11 @@
 	import {
 		ArrowClockwiseIcon,
 		ArrowSquareOutIcon,
-		CircleNotchIcon,
 		PowerIcon,
 		WarningCircleIcon,
 		XIcon
 	} from '$lib/icons';
+	import Spinner from './Spinner.svelte';
 
 	let {
 		session,
@@ -54,10 +54,10 @@
 	}
 </script>
 
-<section>
-	<header>
-		<span class="title">VM</span>
-		<span class="state {status.state}">{label[status.state]}</span>
+<section class="flex h-full flex-col border-l border-light bg-window">
+	<header class="toolbar pr-2.25 pl-3.5">
+		<span class="text-title font-medium">VM</span>
+		<span class="flex-1 text-label text-secondary">{label[status.state]}</span>
 		{#if current?.protocol === 'http'}
 			<button class="icon-button" title="Reload" onclick={() => reload(current)}>
 				<ArrowClockwiseIcon size={14} />
@@ -72,12 +72,15 @@
 			</a>
 		{/if}
 		{#if surfaces.length > 1}
-			<div class="views" role="tablist">
+			<div class="flex gap-0.5 rounded-control bg-base p-0.5" role="tablist">
 				{#each surfaces as surface (surface.name)}
 					<button
+						class={[
+							'h-5.5 rounded-input px-2 text-label',
+							view === surface.name ? 'bg-alternate-base' : 'text-secondary'
+						]}
 						role="tab"
 						aria-selected={view === surface.name}
-						class:selected={view === surface.name}
 						onclick={() => (view = surface.name)}
 					>
 						{surface.label}
@@ -86,7 +89,7 @@
 			</div>
 		{/if}
 		<button
-			class="icon-button destroy"
+			class="icon-button"
 			title="Destroy VM"
 			disabled={status.state === 'stopped'}
 			onclick={ondestroy}
@@ -98,12 +101,12 @@
 		</button>
 	</header>
 
-	<div class="screen">
+	<div class="flex min-h-0 flex-1 bg-black">
 		{#if status.state === 'running'}
 			{#each surfaces as surface (surface.name)}
 				{#key `${boots} ${surface.target} ${reloads[surface.name]}`}
 					<iframe
-						class:hidden={view !== surface.name}
+						class={['flex-1', view !== surface.name && 'hidden']}
 						src={source(surface)}
 						title={surface.label}
 						allow="clipboard-read; clipboard-write"
@@ -111,145 +114,18 @@
 				{/key}
 			{/each}
 		{:else if status.state === 'failed'}
-			<div class="message failure">
+			<div class="m-auto flex max-w-9/10 items-start gap-2.5">
 				<WarningCircleIcon size={18} />
-				<pre>{status.message}</pre>
+				<pre
+					class="max-h-[60vh] overflow-y-auto text-label wrap-break-word whitespace-pre-wrap">{status.message}</pre>
 			</div>
 		{:else if status.state === 'stopped'}
-			<div class="message">The VM is not running</div>
+			<div class="m-auto text-secondary">The VM is not running</div>
 		{:else}
-			<div class="message">
-				<span class="spinner"><CircleNotchIcon size={18} /></span>
+			<div class="m-auto flex items-center gap-2.5 text-secondary">
+				<Spinner size={18} />
 				{label[status.state]}
 			</div>
 		{/if}
 	</div>
 </section>
-
-<style>
-	section {
-		display: flex;
-		flex-direction: column;
-		height: 100%;
-		background: var(--window);
-		border-left: 1px solid var(--light);
-	}
-
-	header {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		height: 44px;
-		padding: 0 9px 0 14px;
-		flex-shrink: 0;
-		border-bottom: 1px solid var(--light);
-	}
-
-	.title {
-		font-size: var(--font-title);
-		font-weight: 500;
-	}
-
-	.state {
-		flex: 1;
-		font-size: var(--font-label);
-		color: var(--text-secondary);
-	}
-
-	.state.running {
-		color: var(--positive);
-	}
-
-	.state.failed {
-		color: var(--danger);
-	}
-
-	.destroy:hover {
-		color: var(--danger);
-		background: var(--danger-tint);
-	}
-
-	.screen {
-		flex: 1;
-		min-height: 0;
-		display: flex;
-		background: #000;
-	}
-
-	iframe {
-		flex: 1;
-		border: none;
-	}
-
-	iframe.hidden {
-		display: none;
-	}
-
-	a.icon-button {
-		display: inline-flex;
-		align-items: center;
-		justify-content: center;
-		color: inherit;
-		transition: background var(--duration-fast) linear;
-	}
-
-	a.icon-button:hover {
-		background: var(--hover);
-	}
-
-	.views {
-		display: flex;
-		padding: 2px;
-		gap: 2px;
-		border-radius: var(--radius-control);
-		background: var(--base);
-	}
-
-	.views button {
-		height: 22px;
-		padding: 0 8px;
-		border-radius: var(--radius-input);
-		font-size: var(--font-label);
-		color: var(--text-secondary);
-	}
-
-	.views button.selected {
-		background: var(--alternate-base);
-		color: var(--window-text);
-	}
-
-	.message {
-		margin: auto;
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		max-width: 90%;
-		color: var(--text-secondary);
-	}
-
-	.failure {
-		align-items: flex-start;
-		color: var(--danger);
-	}
-
-	.failure pre {
-		margin: 0;
-		font-size: var(--font-label);
-		white-space: pre-wrap;
-		word-break: break-word;
-		max-height: 60vh;
-		overflow-y: auto;
-	}
-
-	.spinner {
-		display: inline-flex;
-		color: var(--accent);
-		animation: spin 1s linear infinite;
-	}
-
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-</style>

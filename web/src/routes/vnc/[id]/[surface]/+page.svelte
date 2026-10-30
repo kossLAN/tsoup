@@ -17,29 +17,9 @@
 	});
 </script>
 
-<div class="screen" bind:this={screen}></div>
+<div class="fixed inset-0 bg-black" bind:this={screen}></div>
 {#if !connected}
-	<div class="overlay">Connecting to the VM display</div>
+	<div class="pointer-events-none fixed inset-0 flex items-center justify-center text-secondary">
+		Connecting to the VM display
+	</div>
 {/if}
-
-<style>
-	:global(body) {
-		background: #000;
-		overflow: hidden;
-	}
-
-	.screen {
-		position: fixed;
-		inset: 0;
-	}
-
-	.overlay {
-		position: fixed;
-		inset: 0;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		color: var(--text-secondary);
-		pointer-events: none;
-	}
-</style>

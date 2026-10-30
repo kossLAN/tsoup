@@ -2,6 +2,7 @@ import { createSession, deleteSession, listSessions, type SessionSummary } from 
 
 class SessionList {
 	items = $state<SessionSummary[]>([]);
+	pending = new Map<string, string>();
 
 	async refresh() {
 		this.items = await listSessions();

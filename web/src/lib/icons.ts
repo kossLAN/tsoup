@@ -1,4 +1,5 @@
 export { default as ArrowClockwiseIcon } from 'phosphor-svelte/lib/ArrowClockwiseIcon';
+export { default as ArrowElbowDownLeftIcon } from 'phosphor-svelte/lib/ArrowElbowDownLeftIcon';
 export { default as ArrowSquareOutIcon } from 'phosphor-svelte/lib/ArrowSquareOutIcon';
 export { default as CaretRightIcon } from 'phosphor-svelte/lib/CaretRightIcon';
 export { default as CircleNotchIcon } from 'phosphor-svelte/lib/CircleNotchIcon';
@@ -7,7 +8,6 @@ export { default as FileTextIcon } from 'phosphor-svelte/lib/FileTextIcon';
 export { default as FloppyDiskIcon } from 'phosphor-svelte/lib/FloppyDiskIcon';
 export { default as GearSixIcon } from 'phosphor-svelte/lib/GearSixIcon';
 export { default as MonitorIcon } from 'phosphor-svelte/lib/MonitorIcon';
-export { default as PaperPlaneRightIcon } from 'phosphor-svelte/lib/PaperPlaneRightIcon';
 export { default as PencilSimpleIcon } from 'phosphor-svelte/lib/PencilSimpleIcon';
 export { default as PlayIcon } from 'phosphor-svelte/lib/PlayIcon';
 export { default as PlusIcon } from 'phosphor-svelte/lib/PlusIcon';

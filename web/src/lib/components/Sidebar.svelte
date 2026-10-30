@@ -1,14 +1,21 @@
 <script lang="ts">
-	import { goto } from '$app/navigation';
+	import { afterNavigate, goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { GearSixIcon, PlusIcon, SidebarSimpleIcon, TrashIcon } from '$lib/icons';
 	import { sessions } from '$lib/sessions.svelte';
+	import { cubicOut } from 'svelte/easing';
+	import { fade, fly } from 'svelte/transition';
 
-	let { collapsed = $bindable() }: { collapsed: boolean } = $props();
+	let { open = $bindable() }: { open: boolean } = $props();
 
-	async function create() {
-		const session = await sessions.create();
-		await goto(`/sessions/${session.id}`);
+	afterNavigate(() => {
+		open = false;
+	});
+
+	function keydown(event: KeyboardEvent) {
+		if (open && event.key === 'Escape') {
+			open = false;
+		}
 	}
 
 	async function remove(id: string) {
@@ -19,27 +26,52 @@
 	}
 </script>
 
-<aside class:collapsed>
-	<header>
-		<button class="icon-button" title="Toggle sidebar" onclick={() => (collapsed = !collapsed)}>
-			<SidebarSimpleIcon size={16} />
-		</button>
-		{#if !collapsed}
-			<span class="name">tsoup</span>
-			<button class="icon-button" title="New session" onclick={create}>
-				<PlusIcon size={16} />
-			</button>
-		{/if}
-	</header>
+<svelte:window onkeydown={keydown} />
 
-	{#if !collapsed}
-		<div class="label section">Sessions</div>
-		<nav>
+<button
+	class="fixed top-2.25 left-2.25 z-10 icon-button"
+	title="Open sidebar"
+	onclick={() => (open = true)}
+>
+	<SidebarSimpleIcon size={16} />
+</button>
+
+{#if open}
+	<div
+		class="fixed inset-0 z-20 bg-black/40"
+		role="presentation"
+		onclick={() => (open = false)}
+		transition:fade={{ duration: 150 }}
+	></div>
+
+	<aside
+		class="fixed inset-y-0 left-0 z-30 flex w-65 flex-col border-r border-light bg-base shadow-overlay"
+		transition:fly={{ x: -260, opacity: 1, duration: 200, easing: cubicOut }}
+	>
+		<header class="toolbar gap-1.5 px-2.25">
+			<button class="icon-button" title="Close sidebar" onclick={() => (open = false)}>
+				<SidebarSimpleIcon size={16} />
+			</button>
+			<span class="flex-1 text-title font-medium">tsoup</span>
+			<a class="icon-button" href="/" title="New session" onclick={() => (open = false)}>
+				<PlusIcon size={16} />
+			</a>
+		</header>
+
+		<div class="px-4 pt-3 pb-1.5 label">Sessions</div>
+		<nav class="flex flex-1 flex-col gap-0.5 overflow-y-auto px-1.5 pb-3">
 			{#each sessions.items as session (session.id)}
-				<div class="row" class:active={page.params.id === session.id}>
-					<a href="/sessions/{session.id}">{session.title || 'New session'}</a>
+				<div
+					class={[
+						'group nav-item pr-1',
+						page.params.id === session.id && 'bg-alternate-base'
+					]}
+				>
+					<a class="flex-1 truncate px-2.5 leading-8" href="/sessions/{session.id}">
+						{session.title || 'New session'}
+					</a>
 					<button
-						class="icon-button remove"
+						class="icon-button text-secondary opacity-0 group-hover:opacity-100 hover:text-window-text"
 						title="Delete session"
 						onclick={() => remove(session.id)}
 					>
@@ -48,132 +80,18 @@
 				</div>
 			{/each}
 		</nav>
-	{/if}
 
-	<footer>
-		<a
-			class="settings"
-			class:active={page.url.pathname === '/settings'}
-			href="/settings"
-			title="Settings"
-		>
-			<GearSixIcon size={16} />
-			{#if !collapsed}<span>Settings</span>{/if}
-		</a>
-	</footer>
-</aside>
-
-<style>
-	aside {
-		display: flex;
-		flex-direction: column;
-		width: 260px;
-		flex-shrink: 0;
-		background: var(--base);
-		border-right: 1px solid var(--light);
-		transition: width var(--duration) var(--ease-out-cubic);
-		overflow: hidden;
-	}
-
-	aside.collapsed {
-		width: 44px;
-	}
-
-	header {
-		display: flex;
-		align-items: center;
-		gap: 6px;
-		height: 44px;
-		padding: 0 9px;
-		flex-shrink: 0;
-	}
-
-	.name {
-		flex: 1;
-		font-size: var(--font-title);
-		font-weight: 500;
-	}
-
-	.section {
-		padding: 12px 16px 6px;
-	}
-
-	nav {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-		padding: 0 6px 12px;
-		overflow-y: auto;
-	}
-
-	.row {
-		display: flex;
-		align-items: center;
-		height: 32px;
-		padding-right: 4px;
-		border-radius: var(--radius-control);
-		transition: background var(--duration-fast) linear;
-	}
-
-	.row:hover {
-		background: var(--hover);
-	}
-
-	.row.active {
-		background: var(--alternate-base);
-	}
-
-	.row a {
-		flex: 1;
-		min-width: 0;
-		padding: 0 10px;
-		color: var(--window-text);
-		text-decoration: none;
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-		line-height: 32px;
-	}
-
-	footer {
-		margin-top: auto;
-		padding: 6px;
-		border-top: 1px solid var(--light);
-	}
-
-	.settings {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		height: 32px;
-		padding: 0 7px;
-		border-radius: var(--radius-control);
-		color: var(--window-text);
-		text-decoration: none;
-		white-space: nowrap;
-		transition: background var(--duration-fast) linear;
-	}
-
-	.settings:hover {
-		background: var(--hover);
-	}
-
-	.settings.active {
-		background: var(--alternate-base);
-	}
-
-	.remove {
-		opacity: 0;
-		color: var(--text-secondary);
-	}
-
-	.row:hover .remove {
-		opacity: 1;
-	}
-
-	.remove:hover {
-		color: var(--danger);
-		background: var(--danger-tint);
-	}
-</style>
+		<footer class="mt-auto p-1.5">
+			<a
+				class={[
+					'nav-item gap-2.5 px-1.75',
+					page.url.pathname === '/settings' && 'bg-alternate-base'
+				]}
+				href="/settings"
+			>
+				<GearSixIcon size={16} />
+				Settings
+			</a>
+		</footer>
+	</aside>
+{/if}

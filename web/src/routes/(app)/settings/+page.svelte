@@ -49,25 +49,26 @@
 	}
 </script>
 
-<div class="page">
-	<header>Settings</header>
+<div class="flex min-w-0 flex-1 flex-col">
+	<header class="toolbar pr-6 pl-11 text-title font-medium">Settings</header>
 
 	{#if saved}
-		<form onsubmit={submit}>
-			<div class="label section">Model provider</div>
-			<div class="card">
-				<label class="row">
-					<span>Endpoint</span>
+		<form class="mx-auto w-full max-w-160 p-6" onsubmit={submit}>
+			<div class="px-1 pb-2 label">Model provider</div>
+			<div class="rounded-surface surface p-1">
+				<label class="field">
+					<span class="w-24 shrink-0">Endpoint</span>
 					<input
+						class="input"
 						bind:value={url}
 						placeholder="https://api.openai.com/v1"
 						spellcheck="false"
 					/>
 				</label>
-				<div class="separator"></div>
-				<label class="row">
-					<span>API key</span>
+				<label class="field">
+					<span class="w-24 shrink-0">API key</span>
 					<input
+						class="input"
 						bind:value={key}
 						type="password"
 						autocomplete="off"
@@ -78,7 +79,7 @@
 					{#if saved.has_llm_key}
 						<button
 							type="button"
-							class="remove"
+							class="button enabled:hover:bg-window-text/8"
 							disabled={saving}
 							onclick={() => save('')}
 						>
@@ -86,10 +87,10 @@
 						</button>
 					{/if}
 				</label>
-				<div class="separator"></div>
-				<label class="row">
-					<span>Model</span>
+				<label class="field">
+					<span class="w-24 shrink-0">Model</span>
 					<input
+						class="input"
 						bind:value={model}
 						list="models"
 						placeholder="Choose a model"
@@ -104,139 +105,27 @@
 			</div>
 
 			{#if modelsFailure}
-				<p class="hint failure">Could not list models: {modelsFailure}</p>
+				<p class="mx-1 mt-2 text-label text-danger">
+					Could not list models: {modelsFailure}
+				</p>
 			{:else if models.length}
-				<p class="hint">{models.length} models available from this endpoint</p>
+				<p class="mx-1 mt-2 text-label text-secondary">
+					{models.length} models available from this endpoint
+				</p>
 			{/if}
 
-			<div class="actions">
+			<div class="mt-4 flex items-center justify-end gap-3">
 				{#if status}
-					<span class="status">{status}</span>
+					<span class="text-secondary">{status}</span>
 				{/if}
-				<button type="submit" class="save" disabled={saving}>Save</button>
+				<button
+					type="submit"
+					class="button bg-window-text font-medium text-window enabled:hover:bg-window-text/90"
+					disabled={saving}
+				>
+					Save
+				</button>
 			</div>
 		</form>
 	{/if}
 </div>
-
-<style>
-	.page {
-		flex: 1;
-		display: flex;
-		flex-direction: column;
-		min-width: 0;
-	}
-
-	header {
-		display: flex;
-		align-items: center;
-		height: 44px;
-		padding: 0 24px;
-		flex-shrink: 0;
-		border-bottom: 1px solid var(--light);
-		font-size: var(--font-title);
-		font-weight: 500;
-	}
-
-	form {
-		width: 100%;
-		max-width: 640px;
-		margin: 0 auto;
-		padding: 24px;
-	}
-
-	.section {
-		padding: 0 4px 8px;
-	}
-
-	.card {
-		padding: 4px;
-		background: var(--base);
-		border: 1px solid var(--light);
-		border-radius: var(--radius-surface);
-	}
-
-	.row {
-		display: flex;
-		align-items: center;
-		gap: 10px;
-		min-height: 38px;
-		padding: 0 6px;
-	}
-
-	.row span {
-		width: 96px;
-		flex-shrink: 0;
-	}
-
-	.separator {
-		height: 1px;
-		margin: 0 6px;
-		background: var(--light);
-	}
-
-	input {
-		flex: 1;
-		min-width: 0;
-		height: 28px;
-		padding: 0 8px;
-		background: var(--alternate-base);
-		border: 1px solid var(--light);
-		border-radius: var(--radius-input);
-		outline: none;
-		transition: border-color var(--duration) var(--ease-out-cubic);
-	}
-
-	input:focus {
-		border-color: var(--accent);
-	}
-
-	input::placeholder {
-		color: var(--text-secondary);
-	}
-
-	.remove {
-		height: 28px;
-		padding: 0 10px;
-		color: var(--danger);
-	}
-
-	.remove:hover {
-		background: var(--danger-tint);
-	}
-
-	.hint {
-		margin: 8px 4px 0;
-		font-size: var(--font-label);
-		color: var(--text-secondary);
-	}
-
-	.failure {
-		color: var(--danger);
-	}
-
-	.actions {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 12px;
-		margin-top: 16px;
-	}
-
-	.status {
-		color: var(--text-secondary);
-	}
-
-	.save {
-		height: 28px;
-		padding: 0 16px;
-		background: var(--accent);
-		color: var(--highlighted-text);
-		font-weight: 500;
-	}
-
-	.save:hover {
-		background: var(--accent);
-		filter: brightness(1.1);
-	}
-</style>

@@ -48,7 +48,7 @@ rustPlatform.buildRustPackage {
       root = ../web;
       fileset = ../web/package-lock.json;
     };
-    hash = "sha256-FIjZgQdzIkYW6kzQioR7V9Bh44fikGIaZknPmnhk2D4=";
+    hash = "sha256-RITEmnTTVCxpI3T8QPJxSqnEAZ8GnGROWzzS98pqNjE=";
   };
 
   nativeBuildInputs = [

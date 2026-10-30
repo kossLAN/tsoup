@@ -1,13 +1,18 @@
 <script lang="ts">
-	import { PaperPlaneRightIcon, StopIcon } from '$lib/icons';
+	import { ArrowElbowDownLeftIcon, StopIcon } from '$lib/icons';
 
 	let {
-		busy,
+		busy = false,
 		onsend,
 		onstop
-	}: { busy: boolean; onsend: (text: string) => void; onstop: () => void } = $props();
+	}: {
+		busy?: boolean;
+		onsend: (text: string) => Promise<boolean>;
+		onstop?: () => void;
+	} = $props();
 
 	let text = $state('');
+	let sending = $state(false);
 	let input: HTMLTextAreaElement;
 
 	$effect(() => {
@@ -16,11 +21,15 @@
 		input.style.height = `${input.scrollHeight}px`;
 	});
 
-	function send() {
+	async function send() {
 		const content = text.trim();
-		if (!content || busy) return;
+		if (!content || busy || sending) return;
+		sending = true;
 		text = '';
-		onsend(content);
+		if (!(await onsend(content)) && !text) {
+			text = content;
+		}
+		sending = false;
 	}
 
 	function keydown(event: KeyboardEvent) {
@@ -31,83 +40,30 @@
 	}
 </script>
 
-<div class="composer">
-	<div class="field">
+<div class="mx-auto w-full max-w-chat px-6 pb-5">
+	<div
+		class="flex items-end gap-2 rounded-surface surface py-1.5 pr-1.5 pl-3.5 transition-colors focus-within:border-accent"
+	>
 		<textarea
+			class="max-h-60 flex-1 resize-none overflow-y-auto py-0.75 text-title/5 outline-none placeholder:text-secondary"
 			bind:this={input}
 			bind:value={text}
 			onkeydown={keydown}
 			rows="1"
 			placeholder="Ask the agent"></textarea>
-		{#if busy}
-			<button class="icon-button stop" title="Stop" onclick={onstop}>
-				<StopIcon size={14} weight="fill" />
+		{#if busy && onstop}
+			<button class="icon-button" title="Stop" onclick={onstop}>
+				<StopIcon size={16} />
 			</button>
 		{:else}
-			<button class="icon-button send" title="Send" disabled={!text.trim()} onclick={send}>
-				<PaperPlaneRightIcon size={14} weight="fill" />
+			<button
+				class="icon-button"
+				title="Send"
+				disabled={!text.trim() || sending}
+				onclick={send}
+			>
+				<ArrowElbowDownLeftIcon size={16} />
 			</button>
 		{/if}
 	</div>
 </div>
-
-<style>
-	.composer {
-		width: 100%;
-		max-width: 820px;
-		margin: 0 auto;
-		padding: 0 24px 20px;
-	}
-
-	.field {
-		display: flex;
-		align-items: flex-end;
-		gap: 8px;
-		padding: 6px 6px 6px 14px;
-		background: var(--base);
-		border: 1px solid var(--light);
-		border-radius: var(--radius-surface);
-		transition: border-color var(--duration) var(--ease-out-cubic);
-	}
-
-	.field:focus-within {
-		border-color: var(--accent);
-	}
-
-	textarea {
-		flex: 1;
-		max-height: 240px;
-		padding: 3px 0;
-		resize: none;
-		border: none;
-		outline: none;
-		background: transparent;
-		font-size: var(--font-title);
-		line-height: 20px;
-		overflow-y: auto;
-	}
-
-	textarea::placeholder {
-		color: var(--text-secondary);
-	}
-
-	.send {
-		background: var(--accent);
-		color: var(--highlighted-text);
-	}
-
-	.send:hover {
-		background: var(--accent);
-		filter: brightness(1.1);
-	}
-
-	.send:disabled:hover {
-		background: var(--accent);
-		filter: none;
-	}
-
-	.stop {
-		background: var(--danger-tint);
-		color: var(--danger);
-	}
-</style>

@@ -1,9 +1,10 @@
-import { sessionEvents, type Entry, type SessionEvent, type VmStatus } from './api';
+import { listEntries, sessionEvents, type Entry, type SessionEvent, type VmStatus } from './api';
 import { sessions } from './sessions.svelte';
 
 export class Session {
 	title = $state('');
 	entries = $state<Entry[]>([]);
+	start = $state(0);
 	vm = $state<VmStatus>({ state: 'stopped', built: false });
 	busy = $state(false);
 	failure = $state<string | null>(null);
@@ -11,6 +12,8 @@ export class Session {
 
 	readonly id: string;
 	#events: EventSource;
+	#ready = Promise.withResolvers<void>();
+	readonly ready = this.#ready.promise;
 
 	constructor(id: string) {
 		this.id = id;
@@ -22,14 +25,32 @@ export class Session {
 		this.#events.close();
 	}
 
+	async loadOlder() {
+		if (this.start === 0) return;
+		try {
+			const page = await listEntries(this.id, this.start);
+			if (page.start + page.entries.length !== this.start) return;
+			this.entries = [...page.entries, ...this.entries];
+			this.start = page.start;
+		} catch (error) {
+			this.failure = error instanceof Error ? error.message : String(error);
+		}
+	}
+
 	#apply(event: SessionEvent) {
 		switch (event.type) {
-			case 'snapshot':
+			case 'snapshot': {
+				const gap = event.start - this.start;
+				const kept =
+					gap > 0 && gap <= this.entries.length ? this.entries.slice(0, gap) : [];
 				this.title = event.title;
-				this.entries = event.entries;
+				this.entries = [...kept, ...event.entries];
+				this.start = event.start - kept.length;
 				this.busy = event.busy;
 				this.#setVm(event.vm);
+				this.#ready.resolve();
 				break;
+			}
 			case 'entry':
 				this.entries.push(event.entry);
 				if (!this.title && event.entry.kind === 'user') {

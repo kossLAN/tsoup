@@ -38,7 +38,14 @@ export type VmStatus = (
 ) & { built: boolean };
 
 export type SessionEvent =
-	| { type: 'snapshot'; title: string; entries: Entry[]; vm: VmStatus; busy: boolean }
+	| {
+			type: 'snapshot';
+			title: string;
+			start: number;
+			entries: Entry[];
+			vm: VmStatus;
+			busy: boolean;
+	  }
 	| { type: 'entry'; entry: Entry }
 	| { type: 'turn_started' }
 	| { type: 'turn_finished' }
@@ -71,6 +78,15 @@ export async function deleteSession(id: string): Promise<void> {
 	await request('DELETE', `/api/sessions/${id}`);
 }
 
+export type EntryPage = {
+	start: number;
+	entries: Entry[];
+};
+
+export async function listEntries(id: string, before: number): Promise<EntryPage> {
+	return (await request('GET', `/api/sessions/${id}/entries?before=${before}`)).json();
+}
+
 export async function startTurn(id: string, content: string): Promise<void> {
 	await request('POST', `/api/sessions/${id}/turns`, { content });
 }
@@ -99,8 +115,9 @@ export function vncUrl(id: string, surface: string): string {
 export function surfaceUrl(id: string, surface: string): string {
 	const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 	const host = loopback ? 'localhost' : location.hostname;
-	const port = location.port ? `:${location.port}` : '';
-	return `${location.protocol}//${surface}.${id}.${host}${port}/`;
+	const port = import.meta.env.DEV ? import.meta.env.VITE_BACKEND_PORT : location.port;
+	const origin = port ? `${host}:${port}` : host;
+	return `${location.protocol}//${surface}.${id}.${origin}/`;
 }
 
 export type Settings = {

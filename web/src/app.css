@@ -1,126 +1,156 @@
-@import '@fontsource-variable/geist';
-@import '@fontsource-variable/jetbrains-mono';
+@import 'tailwindcss';
 
-:root {
-	color-scheme: dark;
+@plugin '@tailwindcss/typography';
 
-	--window: #161616;
-	--window-text: #f2f4f8;
-	--base: #1c1c1c;
-	--alternate-base: #232323;
-	--button: #1e1e1e;
-	--accent: #78a9ff;
-	--highlighted-text: #161616;
-	--text-secondary: #96989b;
-	--light: #444444;
-	--mid: #252525;
-	--positive: #25be6a;
-	--negative: #ee5396;
-	--danger: #ff474d;
-	--hover: rgb(242 244 248 / 8%);
-	--danger-tint: rgb(255 71 77 / 14%);
-	--positive-tint: rgb(37 190 106 / 12%);
-	--negative-tint: rgb(238 83 150 / 12%);
+@theme {
+	--color-window: #161616;
+	--color-window-text: #f2f4f8;
+	--color-base: #1c1c1c;
+	--color-alternate-base: #232323;
+	--color-accent: #78a9ff;
+	--color-secondary: #96989b;
+	--color-light: #444444;
+	--color-positive: #25be6a;
+	--color-negative: #ee5396;
+	--color-danger: #ff474d;
 
 	--radius-surface: 12px;
 	--radius-control: 8px;
 	--radius-input: 6px;
 	--radius-small: 4px;
 
-	--font-ui: 'Geist Variable', sans-serif;
+	--font-sans: 'Geist Variable', sans-serif;
 	--font-mono: 'JetBrains Mono Variable', monospace;
-	--font-title: 13px;
-	--font-body: 12px;
-	--font-label: 11px;
 
-	--shadow: 0 4px 16px 2px rgb(0 0 0 / 50%);
-	--ease-out-cubic: cubic-bezier(0.33, 1, 0.68, 1);
-	--duration: 200ms;
-	--duration-fast: 150ms;
+	--text-title: 13px;
+	--text-body: 12px;
+	--text-label: 11px;
+
+	--tracking-label: 0.44px;
+
+	--container-chat: 820px;
+
+	--shadow-overlay: 0 4px 16px 2px rgb(0 0 0 / 50%);
 }
 
-*,
-*::before,
-*::after {
-	box-sizing: border-box;
+@layer base {
+	:root {
+		color-scheme: dark;
+	}
+
+	body {
+		@apply bg-window font-sans text-body text-window-text antialiased;
+	}
+
+	button:not(:disabled) {
+		cursor: pointer;
+	}
+
+	::-webkit-scrollbar {
+		width: 8px;
+		height: 8px;
+	}
+
+	::-webkit-scrollbar-thumb {
+		@apply rounded-small bg-light;
+	}
+
+	::-webkit-scrollbar-track {
+		background: transparent;
+	}
 }
 
-html,
-body {
-	height: 100%;
-	margin: 0;
+@utility label {
+	@apply text-label font-medium tracking-label text-secondary uppercase;
 }
 
-body {
-	background: var(--window);
-	color: var(--window-text);
-	font-family: var(--font-ui);
-	font-size: var(--font-body);
-	-webkit-font-smoothing: antialiased;
+@utility icon-button {
+	@apply inline-flex size-6.5 shrink-0 items-center justify-center rounded-full transition-colors;
+	@apply not-disabled:hover:bg-window-text/8 disabled:opacity-50;
 }
 
-button,
-textarea,
-input {
-	font: inherit;
-	color: inherit;
+@utility button {
+	@apply inline-flex h-7 items-center rounded-control px-3 transition-colors disabled:opacity-50;
 }
 
-button {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: 6px;
-	border: none;
-	border-radius: var(--radius-control);
-	background: transparent;
-	cursor: pointer;
-	transition: background var(--duration-fast) linear;
+@utility surface {
+	@apply border border-light bg-base;
 }
 
-button:hover {
-	background: var(--hover);
+@utility field {
+	@apply flex min-h-9.5 items-center gap-2.5 px-1.5;
 }
 
-button:disabled {
-	cursor: default;
-	opacity: 0.5;
+@utility input {
+	@apply h-7 min-w-0 flex-1 rounded-input border border-light bg-alternate-base px-2 outline-none;
+	@apply transition-colors placeholder:text-secondary focus:border-accent;
 }
 
-button:disabled:hover {
-	background: transparent;
+@utility toolbar {
+	@apply flex h-11 shrink-0 items-center gap-2;
 }
 
-pre,
-code {
-	font-family: var(--font-mono);
+@utility nav-item {
+	@apply flex h-8 items-center rounded-control transition-colors hover:bg-window-text/8;
 }
 
-.label {
-	font-size: var(--font-label);
-	font-weight: 500;
-	letter-spacing: 0.44px;
-	text-transform: uppercase;
-	color: var(--text-secondary);
+@utility bubble {
+	@apply rounded-surface border border-light bg-alternate-base px-3 py-2;
 }
 
-.icon-button {
-	width: 26px;
-	height: 26px;
-	border-radius: 50%;
-	flex-shrink: 0;
+@utility alert {
+	@apply flex items-center gap-2 rounded-control border border-light bg-base px-3 py-2;
 }
 
-::-webkit-scrollbar {
-	width: 8px;
-	height: 8px;
-}
+@utility markdown {
+	@apply prose max-w-none prose-invert;
+	font-size: var(--text-title);
+	line-height: 1.6;
 
-::-webkit-scrollbar-thumb {
-	background: var(--light);
-	border-radius: 4px;
-}
+	--tw-prose-invert-body: var(--color-window-text);
+	--tw-prose-invert-headings: var(--color-window-text);
+	--tw-prose-invert-bold: var(--color-window-text);
+	--tw-prose-invert-links: var(--color-accent);
+	--tw-prose-invert-code: var(--color-window-text);
+	--tw-prose-invert-pre-code: var(--color-window-text);
+	--tw-prose-invert-pre-bg: var(--color-base);
+	--tw-prose-invert-lead: var(--color-secondary);
+	--tw-prose-invert-counters: var(--color-secondary);
+	--tw-prose-invert-bullets: var(--color-secondary);
+	--tw-prose-invert-quotes: var(--color-secondary);
+	--tw-prose-invert-quote-borders: var(--color-light);
+	--tw-prose-invert-hr: var(--color-light);
+	--tw-prose-invert-th-borders: var(--color-light);
+	--tw-prose-invert-td-borders: var(--color-light);
 
-::-webkit-scrollbar-track {
-	background: transparent;
+	& :where(h1, h2, h3, h4) {
+		@apply font-semibold;
+	}
+
+	& :where(h1) {
+		font-size: 1.4em;
+	}
+
+	& :where(h2) {
+		font-size: 1.25em;
+	}
+
+	& :where(h3, h4) {
+		font-size: 1.1em;
+	}
+
+	& :where(pre) {
+		@apply rounded-control border border-light;
+	}
+
+	& :where(code):not(:where(pre code)) {
+		@apply rounded-small bg-alternate-base px-1 py-0.5 font-normal;
+	}
+
+	& :where(code):not(:where(pre code))::before,
+	& :where(code):not(:where(pre code))::after,
+	& :where(blockquote p)::before,
+	& :where(blockquote p)::after {
+		content: none;
+	}
 }

@@ -1,12 +1,32 @@
 <script lang="ts">
 	import type { Entry } from '$lib/api';
-	import { CircleNotchIcon, WarningCircleIcon } from '$lib/icons';
+	import { WarningCircleIcon } from '$lib/icons';
+	import { tick } from 'svelte';
+	import Markdown from './Markdown.svelte';
+	import Spinner from './Spinner.svelte';
 	import ToolCallLine from './ToolCallLine.svelte';
 
-	let { entries, busy, failure }: { entries: Entry[]; busy: boolean; failure: string | null } =
-		$props();
+	let {
+		entries,
+		start,
+		busy,
+		failure,
+		onolder
+	}: {
+		entries: Entry[];
+		start: number;
+		busy: boolean;
+		failure: string | null;
+		onolder: () => Promise<void>;
+	} = $props();
+
+	const threshold = 400;
 
 	let scroller: HTMLElement;
+	let pinned = true;
+	let anchor: number | null = null;
+	let end = 0;
+	let loading = false;
 
 	const results = $derived(
 		new Map(
@@ -16,26 +36,71 @@
 		)
 	);
 
-	$effect(() => {
-		void entries.length;
-		void busy;
-		if (scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 200) {
-			scroller.scrollTo({ top: scroller.scrollHeight });
+	$effect.pre(() => {
+		void start;
+		if (scroller && !pinned) {
+			anchor = scroller.scrollHeight - scroller.scrollTop;
 		}
 	});
+
+	$effect(() => {
+		void busy;
+		void failure;
+		const total = start + entries.length;
+		if (total > end && entries.at(-1)?.kind === 'user') {
+			pinned = true;
+		}
+		end = total;
+
+		if (pinned) {
+			scroller.scrollTop = scroller.scrollHeight;
+		} else if (anchor !== null) {
+			scroller.scrollTop = scroller.scrollHeight - anchor;
+		}
+		anchor = null;
+		older();
+	});
+
+	async function older() {
+		if (loading) return;
+		loading = true;
+		try {
+			while (start > 0 && scroller.scrollTop < threshold) {
+				const before = start;
+				await onolder();
+				await tick();
+				if (start === before) break;
+			}
+		} finally {
+			loading = false;
+		}
+	}
+
+	function scrolled() {
+		pinned = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+		older();
+	}
 </script>
 
-<div class="scroller" bind:this={scroller}>
-	<div class="timeline">
-		{#each entries as entry, index (index)}
+<div class="flex-1 overflow-y-auto" bind:this={scroller} onscroll={scrolled}>
+	<div class="mx-auto flex max-w-chat flex-col gap-2.5 px-6 pt-6 pb-3">
+		{#if start > 0}
+			<div class="flex justify-center"><Spinner size={14} /></div>
+		{/if}
+
+		{#each entries as entry, index (start + index)}
 			{#if entry.kind === 'user'}
-				<div class="user">{entry.text}</div>
+				<div
+					class="max-w-4/5 self-end bubble text-title/relaxed wrap-break-word whitespace-pre-wrap"
+				>
+					{entry.text}
+				</div>
 			{:else if entry.kind === 'assistant'}
 				{#if entry.text}
-					<div class="assistant">{entry.text}</div>
+					<Markdown text={entry.text} />
 				{/if}
 				{#if entry.tool_calls.length}
-					<div class="calls">
+					<div class="flex flex-col gap-0.5">
 						{#each entry.tool_calls as call (call.id)}
 							<ToolCallLine {call} result={results.get(call.id)} pending={busy} />
 						{/each}
@@ -45,80 +110,11 @@
 		{/each}
 
 		{#if busy}
-			<div class="working">
-				<span class="spinner"><CircleNotchIcon size={14} /></span>Working
-			</div>
+			<div class="flex items-center gap-2 text-secondary"><Spinner size={14} />Working</div>
 		{/if}
 
 		{#if failure}
-			<div class="failure"><WarningCircleIcon size={14} />{failure}</div>
+			<div class="alert whitespace-pre-wrap"><WarningCircleIcon size={14} />{failure}</div>
 		{/if}
 	</div>
 </div>
-
-<style>
-	.scroller {
-		flex: 1;
-		overflow-y: auto;
-	}
-
-	.timeline {
-		display: flex;
-		flex-direction: column;
-		gap: 10px;
-		max-width: 820px;
-		margin: 0 auto;
-		padding: 24px 24px 12px;
-	}
-
-	.user,
-	.assistant {
-		font-size: var(--font-title);
-		line-height: 1.6;
-		white-space: pre-wrap;
-		word-break: break-word;
-	}
-
-	.user {
-		align-self: flex-end;
-		max-width: 80%;
-		padding: 8px 12px;
-		background: var(--alternate-base);
-		border: 1px solid var(--light);
-		border-radius: var(--radius-surface);
-	}
-
-	.calls {
-		display: flex;
-		flex-direction: column;
-		gap: 2px;
-	}
-
-	.working,
-	.failure {
-		display: flex;
-		align-items: center;
-		gap: 8px;
-		color: var(--text-secondary);
-	}
-
-	.failure {
-		padding: 8px 12px;
-		color: var(--danger);
-		background: var(--danger-tint);
-		border-radius: var(--radius-control);
-		white-space: pre-wrap;
-	}
-
-	.spinner {
-		display: inline-flex;
-		color: var(--accent);
-		animation: spin 1s linear infinite;
-	}
-
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-</style>

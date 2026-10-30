@@ -1,7 +1,8 @@
 <script lang="ts">
 	import type { Entry, ToolCall } from '$lib/api';
-	import { CaretRightIcon, CircleNotchIcon, WarningCircleIcon } from '$lib/icons';
+	import { CaretRightIcon, WarningCircleIcon } from '$lib/icons';
 	import Diff from './Diff.svelte';
+	import Spinner from './Spinner.svelte';
 
 	type ToolResult = Extract<Entry, { kind: 'tool' }>;
 
@@ -62,139 +63,53 @@
 	});
 </script>
 
-<div class="call">
-	<button class="line" class:open={expanded} onclick={() => (open = !expanded)}>
-		<span class="label">{label}</span>
+{#snippet output(text: string, error = false)}
+	<pre
+		class={[
+			'max-h-90 overflow-y-auto rounded-control surface px-3 py-2 text-label/normal',
+			'wrap-break-word whitespace-pre-wrap',
+			error ? 'text-danger' : 'text-secondary'
+		]}>{text}</pre>
+{/snippet}
+
+<div class="flex min-w-0 flex-col gap-1">
+	<button
+		class="group flex h-5.5 max-w-full items-center gap-1.5 text-secondary transition-colors hover:text-window-text"
+		onclick={() => (open = !expanded)}
+	>
+		<span class="shrink-0">{label}</span>
 		{#if target}
-			<span class="target">{target}</span>
+			<span class="truncate font-mono text-label">{target}</span>
 		{/if}
 		{#if running}
-			<span class="spinner"><CircleNotchIcon size={12} /></span>
+			<Spinner size={12} />
 		{:else if result?.error}
-			<span class="failed"><WarningCircleIcon size={12} /></span>
+			<span class="inline-flex shrink-0"><WarningCircleIcon size={12} /></span>
 		{/if}
-		<span class="caret"><CaretRightIcon size={10} /></span>
+		<span
+			class={[
+				'inline-flex shrink-0 transition',
+				expanded ? 'rotate-90' : 'opacity-0 group-hover:opacity-100'
+			]}
+		>
+			<CaretRightIcon size={10} />
+		</span>
 	</button>
 
 	{#if expanded}
 		{#if result?.diff}
-			<div class="block diff">
+			<div class="max-h-105 overflow-y-auto rounded-control surface">
 				<Diff diff={result.diff} />
 			</div>
 		{:else}
 			{#if detail}
-				<pre class="block">{detail}</pre>
+				{@render output(detail)}
 			{/if}
 			{#if result}
-				<pre class="block" class:error={result.error}>{result.output}</pre>
+				{@render output(result.output, result.error)}
 			{:else if !pending}
-				<pre class="block">interrupted</pre>
+				{@render output('interrupted')}
 			{/if}
 		{/if}
 	{/if}
 </div>
-
-<style>
-	.call {
-		display: flex;
-		flex-direction: column;
-		gap: 4px;
-		min-width: 0;
-	}
-
-	.line {
-		justify-content: flex-start;
-		gap: 6px;
-		max-width: 100%;
-		height: 22px;
-		padding: 0;
-		border-radius: 0;
-		color: var(--text-secondary);
-		transition: color var(--duration-fast) linear;
-	}
-
-	.line:hover {
-		background: transparent;
-		color: var(--window-text);
-	}
-
-	.label {
-		flex-shrink: 0;
-		font-weight: 400;
-	}
-
-	.target {
-		min-width: 0;
-		font-family: var(--font-mono);
-		font-size: var(--font-label);
-		white-space: nowrap;
-		overflow: hidden;
-		text-overflow: ellipsis;
-	}
-
-	.spinner,
-	.failed,
-	.caret {
-		display: inline-flex;
-		flex-shrink: 0;
-	}
-
-	.spinner {
-		color: var(--accent);
-		animation: spin 1s linear infinite;
-	}
-
-	.failed {
-		color: var(--danger);
-	}
-
-	.caret {
-		opacity: 0;
-		transition:
-			opacity var(--duration-fast) linear,
-			transform var(--duration-fast) linear;
-	}
-
-	.line:hover .caret,
-	.line.open .caret {
-		opacity: 1;
-	}
-
-	.line.open .caret {
-		transform: rotate(90deg);
-	}
-
-	.block {
-		margin: 0;
-		background: var(--base);
-		border: 1px solid var(--light);
-		border-radius: var(--radius-control);
-		overflow: hidden;
-	}
-
-	pre.block {
-		padding: 8px 12px;
-		font-size: var(--font-label);
-		line-height: 1.5;
-		color: var(--text-secondary);
-		white-space: pre-wrap;
-		word-break: break-word;
-		max-height: 360px;
-		overflow-y: auto;
-	}
-
-	pre.block.error {
-		color: var(--danger);
-	}
-
-	.diff {
-		max-height: 420px;
-		overflow-y: auto;
-	}
-
-	@keyframes spin {
-		to {
-			transform: rotate(360deg);
-		}
-	}
-</style>

@@ -18,6 +18,7 @@ const SESSION_FILE: &str = "session.json";
 pub const WORKSPACE_DIR: &str = "workspace";
 const EVENT_BUFFER: usize = 256;
 const TITLE_LENGTH: usize = 60;
+const PAGE_SIZE: usize = 50;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -35,6 +36,12 @@ pub enum SessionError {
 pub struct SessionSummary {
     pub id: Uuid,
     pub title: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct EntryPage {
+    pub start: usize,
+    pub entries: Vec<Entry>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -196,6 +203,16 @@ impl Session {
         self.data.lock().await.entries.clone()
     }
 
+    pub async fn page(&self, before: usize) -> EntryPage {
+        let data = self.data.lock().await;
+        let end = before.min(data.entries.len());
+        let start = end.saturating_sub(PAGE_SIZE);
+        EntryPage {
+            start,
+            entries: data.entries[start..end].to_vec(),
+        }
+    }
+
     pub async fn push(&self, entry: Entry) -> Result<(), SessionError> {
         let mut data = self.data.lock().await;
 
@@ -218,9 +235,11 @@ impl Session {
     pub async fn subscribe(&self) -> (Event, broadcast::Receiver<Event>) {
         let data = self.data.lock().await;
         let receiver = self.events.subscribe();
+        let start = data.entries.len().saturating_sub(PAGE_SIZE);
         let snapshot = Event::Snapshot {
             title: data.title.clone(),
-            entries: data.entries.clone(),
+            start,
+            entries: data.entries[start..].to_vec(),
             vm: self.vm.status(),
             busy: self.busy().await,
         };

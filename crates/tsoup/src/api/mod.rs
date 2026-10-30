@@ -5,7 +5,7 @@ mod web;
 
 use std::sync::Arc;
 
-use axum::extract::{Path as UrlPath, State};
+use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::Sse;
 use axum::response::sse::{self, KeepAlive};
@@ -18,7 +18,7 @@ use uuid::Uuid;
 
 pub use self::error::ApiError;
 use crate::agent::Agent;
-use crate::session::{Session, SessionSummary, Sessions};
+use crate::session::{EntryPage, Session, SessionSummary, Sessions};
 use crate::settings::{SettingsStore, SettingsUpdate, SettingsView};
 
 #[derive(Clone)]
@@ -56,6 +56,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/{id}", delete(delete_session))
         .route("/api/sessions/{id}/events", get(events))
+        .route("/api/sessions/{id}/entries", get(list_entries))
         .route("/api/sessions/{id}/turns", post(start_turn))
         .route("/api/sessions/{id}/turn", delete(cancel_turn))
         .route("/api/sessions/{id}/vm", post(start_vm).delete(destroy_vm))
@@ -71,6 +72,11 @@ pub fn router(state: AppState) -> Router {
 #[derive(Deserialize)]
 struct TurnRequest {
     content: String,
+}
+
+#[derive(Deserialize)]
+struct EntriesQuery {
+    before: usize,
 }
 
 async fn get_settings(State(state): State<AppState>) -> Json<SettingsView> {
@@ -122,6 +128,14 @@ async fn events(
         .map(|event| sse::Event::default().json_data(event))
         .take_until(state.shutdown.cancelled_owned());
     Ok(Sse::new(events).keep_alive(KeepAlive::default()))
+}
+
+async fn list_entries(
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<Uuid>,
+    Query(query): Query<EntriesQuery>,
+) -> Result<Json<EntryPage>, ApiError> {
+    Ok(Json(state.session(id).await?.page(query.before).await))
 }
 
 async fn start_turn(

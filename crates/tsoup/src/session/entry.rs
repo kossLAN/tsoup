@@ -32,6 +32,7 @@ pub struct FileDiff {
 pub enum Event {
     Snapshot {
         title: String,
+        start: usize,
         entries: Vec<Entry>,
         vm: VmStatus,
         busy: bool,
