@@ -22,12 +22,16 @@
 		edit_file: ['editing', 'edited'],
 		create_vm: ['creating a vm', 'created a vm'],
 		run_vm: ['starting the vm', 'started the vm'],
-		destroy_vm: ['destroying the vm', 'destroyed the vm']
+		destroy_vm: ['destroying the vm', 'destroyed the vm'],
+		show_website: ['showing the website', 'showed the website']
 	};
 
 	const running = $derived(!result && pending);
 
+	const mcp = $derived(call.function.name.match(/^mcp__(.+?)__(.+)$/));
+
 	const label = $derived.by(() => {
+		if (mcp) return `${mcp[1]} ${mcp[2]}`;
 		const forms = labels[call.function.name];
 		if (!forms) return call.function.name;
 		return running ? forms[0] : forms[1];
@@ -44,6 +48,8 @@
 	const target = $derived.by(() => {
 		if (typeof args.command === 'string') return args.command;
 		if (typeof args.path === 'string') return args.path;
+		if (typeof args.url === 'string') return args.url;
+		if (typeof args.port === 'number') return `port ${args.port}`;
 		return '';
 	});
 

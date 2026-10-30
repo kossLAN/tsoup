@@ -1,6 +1,7 @@
 mod create_vm;
 mod destroy_vm;
 mod edit_file;
+mod mcp;
 mod read_file;
 mod run_vm;
 mod shell;
@@ -14,6 +15,7 @@ use futures_util::future::BoxFuture;
 use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
 use serde::de::DeserializeOwned;
+use tsoup_proto::{McpFailure, McpTool};
 
 use self::create_vm::CreateVm;
 use self::destroy_vm::DestroyVm;
@@ -23,7 +25,7 @@ use self::run_vm::RunVm;
 use self::shell::Shell;
 use self::show_website::ShowWebsite;
 use self::write_file::WriteFile;
-use crate::llm::{FunctionDefinition, ToolCall, ToolDefinition, ToolKind};
+use crate::llm::{FunctionCall, FunctionDefinition, ToolCall, ToolDefinition, ToolKind};
 use crate::session::{FileDiff, Session};
 use crate::vm::VmError;
 
@@ -73,6 +75,16 @@ impl Outcome {
     }
 }
 
+fn booted(failures: &[McpFailure]) -> Outcome {
+    let mut output = String::from("the VM is running and the user sees it in their preview pane");
+
+    for McpFailure { server, message } in failures {
+        output.push_str(&format!("\nthe MCP server {server} failed: {message}"));
+    }
+
+    Outcome::text(output)
+}
+
 pub trait Tool: Send + Sync + 'static {
     const NAME: &'static str;
     const DESCRIPTION: &'static str;
@@ -94,7 +106,7 @@ trait ErasedTool: Send + Sync {
     fn call<'a>(
         &'a self,
         session: &'a Session,
-        arguments: &'a str,
+        raw: &'a str,
     ) -> BoxFuture<'a, Result<Outcome, ToolError>>;
 }
 
@@ -114,8 +126,8 @@ where
         ToolDefinition {
             kind: ToolKind::Function,
             function: FunctionDefinition {
-                name: T::NAME,
-                description: T::DESCRIPTION,
+                name: T::NAME.into(),
+                description: T::DESCRIPTION.into(),
                 parameters,
             },
         }
@@ -124,18 +136,9 @@ where
     fn call<'a>(
         &'a self,
         session: &'a Session,
-        arguments: &'a str,
+        raw: &'a str,
     ) -> BoxFuture<'a, Result<Outcome, ToolError>> {
-        Box::pin(async move {
-            let arguments = if arguments.trim().is_empty() {
-                "{}"
-            } else {
-                arguments
-            };
-
-            let arguments = serde_json::from_str(arguments).map_err(ToolError::Arguments)?;
-            self.run(session, arguments).await
-        })
+        Box::pin(async move { self.run(session, arguments(raw)?).await })
     }
 }
 
@@ -160,20 +163,33 @@ impl Toolbox {
         Self { tools, definitions }
     }
 
-    pub fn definitions(&self) -> &[ToolDefinition] {
-        &self.definitions
+    pub fn definitions(&self, mcp: &[McpTool]) -> Vec<ToolDefinition> {
+        self.definitions
+            .iter()
+            .cloned()
+            .chain(mcp.iter().filter_map(mcp::definition))
+            .collect()
     }
 
     pub async fn execute(&self, session: &Session, call: &ToolCall) -> Outcome {
-        let result = match self
-            .tools
-            .iter()
-            .find(|tool| tool.name() == call.function.name)
-        {
-            Some(tool) => tool.call(session, &call.function.arguments).await,
-            None => Err(ToolError::Unknown(call.function.name.clone())),
+        let FunctionCall { name, arguments } = &call.function;
+
+        let result = if let Some(tool) = self.tools.iter().find(|tool| tool.name() == name) {
+            tool.call(session, arguments).await
+        } else if let Some((server, tool)) = mcp::parse(name) {
+            mcp::call(session, server, tool, arguments).await
+        } else {
+            Err(ToolError::Unknown(name.clone()))
         };
 
         result.unwrap_or_else(Outcome::failure)
     }
+}
+
+fn arguments<T>(raw: &str) -> Result<T, ToolError>
+where
+    T: DeserializeOwned,
+{
+    let raw = if raw.trim().is_empty() { "{}" } else { raw };
+    serde_json::from_str(raw).map_err(ToolError::Arguments)
 }

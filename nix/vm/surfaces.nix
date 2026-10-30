@@ -1,4 +1,3 @@
-{ runtime }:
 {
   config,
   lib,
@@ -21,7 +20,7 @@ let
 
         socket = lib.mkOption {
           type = lib.types.str;
-          default = "${runtime}/${name}.sock";
+          default = "${config.tsoup.runtime}/${name}.sock";
           readOnly = true;
         };
 
@@ -49,10 +48,17 @@ let
     };
 in
 {
-  options.tsoup.surfaces = lib.mkOption {
-    type = lib.types.attrsOf (lib.types.submodule surface);
-    default = { };
-    internal = true;
+  options.tsoup = {
+    runtime = lib.mkOption {
+      type = lib.types.str;
+      internal = true;
+    };
+
+    surfaces = lib.mkOption {
+      type = lib.types.attrsOf (lib.types.submodule surface);
+      default = { };
+      internal = true;
+    };
   };
 
   config = {

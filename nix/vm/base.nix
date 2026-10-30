@@ -1,31 +1,16 @@
 {
-  uid,
-  guestAgent,
-}:
-{
   config,
   lib,
   pkgs,
   ...
 }:
-let
-  session = {
-    user = "agent";
-    command = lib.escapeShellArgs config.tsoup.session;
-  };
-in
 {
-  options.tsoup.session = lib.mkOption {
-    type = lib.types.listOf lib.types.str;
+  options.tsoup.uid = lib.mkOption {
+    type = lib.types.int;
     internal = true;
   };
 
   config = {
-    tsoup.session = lib.mkDefault [
-      (lib.getExe' pkgs.dbus "dbus-run-session")
-      (lib.getExe guestAgent)
-    ];
-
     tsoup.surfaces = {
       terminal = {
         label = "Terminal";
@@ -72,7 +57,7 @@ in
 
     users.users.agent = {
       isNormalUser = lib.mkForce true;
-      uid = lib.mkForce uid;
+      uid = lib.mkForce config.tsoup.uid;
       extraGroups = [ "wheel" ];
     };
 
@@ -82,13 +67,7 @@ in
       SUBSYSTEM=="virtio-ports", ATTR{name}=="tsoup.agent", OWNER="agent"
     '';
 
-    services.greetd = {
-      enable = lib.mkForce true;
-      settings = {
-        initial_session = lib.mkForce session;
-        default_session = lib.mkForce session;
-      };
-    };
+    services.greetd.enable = lib.mkForce true;
 
     systemd.services.tsoup-terminal = {
       wantedBy = [ "multi-user.target" ];

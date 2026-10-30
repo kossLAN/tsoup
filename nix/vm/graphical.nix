@@ -4,15 +4,24 @@
   pkgs,
   ...
 }:
+let
+  session = {
+    user = "agent";
+    command = lib.escapeShellArgs [
+      (lib.getExe' pkgs.dbus "dbus-run-session")
+      (lib.getExe' pkgs.kdePackages.kwin "kwin_wayland")
+      "--drm"
+      "--no-lockscreen"
+      "--xwayland"
+      "--exit-with-session=${lib.getExe guestAgent}"
+    ];
+  };
+in
 {
-  tsoup.session = lib.mkForce [
-    (lib.getExe' pkgs.dbus "dbus-run-session")
-    (lib.getExe' pkgs.kdePackages.kwin "kwin_wayland")
-    "--drm"
-    "--no-lockscreen"
-    "--xwayland"
-    "--exit-with-session=${lib.getExe guestAgent}"
-  ];
+  services.greetd.settings = {
+    initial_session = lib.mkForce session;
+    default_session = lib.mkForce session;
+  };
 
   tsoup.surfaces.display = {
     label = "Display";

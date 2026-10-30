@@ -18,10 +18,16 @@ A headless VM has no display, use it for command line programs and web apps.
 The user always has a terminal into the VM in their preview pane.
 To show them a website served from the VM, start its server in the background with shell
 and call show_website with its port.
+MCP servers in the VM appear as mcp__<server>__<tool> tools while the VM runs.
 The VM is ephemeral: everything outside /workspace is lost when it is destroyed or replaced.
 Calling create_vm again rebuilds the VM from a new module,
 so add packages that way instead of installing them imperatively.
 To start a VM that is not running without rebuilding it, call run_vm.";
+
+const DESCRIPTION: &str = match option_env!("TSOUP_DESCRIPTION") {
+    Some(description) => description,
+    None => "",
+};
 
 const INTERRUPTED: &str = "the tool call was interrupted before it finished";
 
@@ -77,14 +83,10 @@ impl Agent {
 
         loop {
             let messages = conversation(&session.entries().await);
+            let tools = self.tools.definitions(&session.vm.mcp_tools().await);
             let reply = self
                 .llm
-                .complete(
-                    settings.endpoint(),
-                    model,
-                    &messages,
-                    self.tools.definitions(),
-                )
+                .complete(settings.endpoint(), model, &messages, &tools)
                 .await?;
             let calls = reply.tool_calls.clone();
             session
@@ -115,7 +117,7 @@ impl Agent {
 
 fn conversation(entries: &[Entry]) -> Vec<Message> {
     let mut messages = vec![Message::System {
-        content: SYSTEM_PROMPT.to_owned(),
+        content: system_prompt(),
     }];
     let mut unanswered = Vec::new();
 
@@ -149,6 +151,15 @@ fn conversation(entries: &[Entry]) -> Vec<Message> {
 
     interrupt(&mut messages, &mut unanswered);
     messages
+}
+
+fn system_prompt() -> String {
+    match DESCRIPTION.trim_end() {
+        "" => SYSTEM_PROMPT.to_owned(),
+        description => {
+            format!("{SYSTEM_PROMPT}\nThese modules are part of every VM:\n{description}")
+        },
+    }
 }
 
 fn interrupt(messages: &mut Vec<Message>, unanswered: &mut Vec<String>) {

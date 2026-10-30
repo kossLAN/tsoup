@@ -13,7 +13,7 @@ use tokio::net::{UnixListener, UnixStream};
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, broadcast, watch};
 use tokio_util::codec::Framed;
-use tsoup_proto::{CodecError, Frame, HostCodec, Request, Response};
+use tsoup_proto::{CodecError, Frame, HostCodec, McpFailure, McpTool, Request, Response};
 
 use self::build::RUNNER_LINK;
 pub use self::build::{BuildError, Builder, VmKind};
@@ -123,7 +123,7 @@ impl Vm {
         &self,
         module: Option<String>,
         kind: Option<VmKind>,
-    ) -> Result<(), VmError> {
+    ) -> Result<Vec<McpFailure>, VmError> {
         let mut running = self.running.lock().await;
 
         self.set_state(VmState::Building);
@@ -150,7 +150,7 @@ impl Vm {
         self.boot(&mut running, &runner).await
     }
 
-    pub async fn run(&self) -> Result<(), VmError> {
+    pub async fn run(&self) -> Result<Vec<McpFailure>, VmError> {
         let mut running = self.running.lock().await;
 
         if running.is_some() {
@@ -167,14 +167,18 @@ impl Vm {
         self.boot(&mut running, &runner).await
     }
 
-    async fn boot(&self, running: &mut Option<Running>, runner: &Path) -> Result<(), VmError> {
+    async fn boot(
+        &self,
+        running: &mut Option<Running>,
+        runner: &Path,
+    ) -> Result<Vec<McpFailure>, VmError> {
         self.set_state(VmState::Booting);
 
         match Running::launch(&self.dir, &self.runtime, runner).await {
-            Ok(launched) => {
+            Ok((launched, failures)) => {
                 self.set_state(launched.state());
                 *running = Some(launched);
-                Ok(())
+                Ok(failures)
             },
             Err(error) => {
                 self.set_state(VmState::Failed {
@@ -207,6 +211,15 @@ impl Vm {
         ) {
             self.set_state(running.as_ref().map_or(VmState::Stopped, Running::state));
         }
+    }
+
+    pub async fn mcp_tools(&self) -> Vec<McpTool> {
+        self.running
+            .lock()
+            .await
+            .as_ref()
+            .map(|vm| vm.tools.clone())
+            .unwrap_or_default()
     }
 
     pub async fn request(&self, request: Request) -> Result<Response, VmError> {
@@ -286,10 +299,15 @@ struct Running {
     process: Child,
     guest: Guest,
     surfaces: Vec<Surface>,
+    tools: Vec<McpTool>,
 }
 
 impl Running {
-    async fn launch(dir: &Path, runtime: &Path, runner: &Path) -> Result<Self, VmError> {
+    async fn launch(
+        dir: &Path,
+        runtime: &Path,
+        runner: &Path,
+    ) -> Result<(Self, Vec<McpFailure>), VmError> {
         let surfaces = Surface::load(runner).await?;
         tokio::fs::create_dir_all(runtime).await?;
 
@@ -324,21 +342,29 @@ impl Running {
             let (stream, _) = listener.accept().await?;
             let mut guest = Guest::new(stream);
             guest.request(Request::Ping).await?;
-            Ok::<_, VmError>(guest)
+
+            match guest.request(Request::McpTools).await? {
+                Response::McpTools { tools, failures } => Ok((guest, tools, failures)),
+                _ => Err(VmError::UnexpectedResponse),
+            }
         };
 
-        let guest = tokio::select! {
+        let (guest, tools, failures) = tokio::select! {
             guest = tokio::time::timeout(BOOT_TIMEOUT, connect) => {
                 guest.map_err(|_| VmError::BootTimeout)??
             },
             status = process.wait() => return Err(VmError::Exited(status?)),
         };
 
-        Ok(Self {
-            process,
-            guest,
-            surfaces,
-        })
+        Ok((
+            Self {
+                process,
+                guest,
+                surfaces,
+                tools,
+            },
+            failures,
+        ))
     }
 
     fn state(&self) -> VmState {

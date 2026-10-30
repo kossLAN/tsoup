@@ -4,6 +4,7 @@ use std::marker::PhantomData;
 use bytes::{Bytes, BytesMut};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value};
 use tokio_util::codec::{Decoder, Encoder, LengthDelimitedCodec};
 
 pub const PORT: &str = "tsoup.agent";
@@ -20,9 +21,23 @@ pub struct Frame<T> {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Request {
     Ping,
-    Exec { command: String, timeout_secs: u64 },
-    Spawn { command: String },
-    Forward { from: u16, to: u16 },
+    Exec {
+        command: String,
+        timeout_secs: u64,
+    },
+    Spawn {
+        command: String,
+    },
+    Forward {
+        from: u16,
+        to: u16,
+    },
+    McpTools,
+    McpCall {
+        server: String,
+        tool: String,
+        arguments: Map<String, Value>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -37,9 +52,31 @@ pub enum Response {
     TimedOut,
     Spawned,
     Forwarded,
+    McpTools {
+        tools: Vec<McpTool>,
+        failures: Vec<McpFailure>,
+    },
+    McpOutput {
+        output: String,
+        error: bool,
+    },
     Failed {
         message: String,
     },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpTool {
+    pub server: String,
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpFailure {
+    pub server: String,
+    pub message: String,
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -11,6 +11,10 @@ const TSOUP_FLAKE: &str = match option_env!("TSOUP_FLAKE") {
     Some(flake) => flake,
     None => concat!(env!("CARGO_MANIFEST_DIR"), "/../.."),
 };
+const TSOUP_EXTRA_MODULES: &str = match option_env!("TSOUP_EXTRA_MODULES") {
+    Some(modules) => modules,
+    None => "[]",
+};
 const EMPTY_MODULE: &str = "{ }\n";
 const ENVIRONMENT_DIR: &str = "environment";
 const HOST_FILE: &str = "host.json";
@@ -23,6 +27,10 @@ pub enum BuildError {
     Io(#[from] io::Error),
     #[error("encoding the host settings: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("reading the extra modules: {0}")]
+    ExtraModules(serde_json::Error),
+    #[error("hashing an extra module failed:\n{0}")]
+    Hash(String),
     #[error("nix build failed:\n{0}")]
     Failed(String),
 }
@@ -36,10 +44,20 @@ pub enum VmKind {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct Host {
     uid: u32,
     kind: VmKind,
     runtime: PathBuf,
+    #[serde(default)]
+    extra_modules: Vec<ExtraModule>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ExtraModule {
+    path: PathBuf,
+    nar_hash: String,
 }
 
 pub struct Builder {
@@ -73,6 +91,7 @@ impl Builder {
                 uid: self.uid,
                 kind,
                 runtime: runtime.to_owned(),
+                extra_modules: extra_modules().await?,
             })?,
         )
         .await?;
@@ -88,30 +107,21 @@ impl Builder {
         }
 
         let runner = dir.join(RUNNER_LINK);
-        let output = Command::new("nix")
-            .args([
-                "--extra-experimental-features",
-                "nix-command flakes",
-                "build",
-                "--no-write-lock-file",
-                "--override-input",
-                "tsoup",
-                TSOUP_FLAKE,
-                "--out-link",
-            ])
-            .arg(&runner)
-            .arg(format!("path:{}#default", environment.display()))
-            .stdin(Stdio::null())
-            .kill_on_drop(true)
-            .output()
-            .await?;
-
-        if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            let lines: Vec<_> = stderr.lines().collect();
-            let tail = &lines[lines.len().saturating_sub(ERROR_LINES)..];
-            return Err(BuildError::Failed(tail.join("\n")));
-        }
+        run(
+            nix()
+                .args([
+                    "build",
+                    "--no-write-lock-file",
+                    "--override-input",
+                    "tsoup",
+                    TSOUP_FLAKE,
+                    "--out-link",
+                ])
+                .arg(&runner)
+                .arg(format!("path:{}#default", environment.display())),
+            BuildError::Failed,
+        )
+        .await?;
 
         Ok(runner)
     }
@@ -124,4 +134,41 @@ async fn last_kind(host: &Path) -> VmKind {
         .and_then(|host| serde_json::from_slice::<Host>(&host).ok())
         .map(|host| host.kind)
         .unwrap_or_default()
+}
+
+async fn extra_modules() -> Result<Vec<ExtraModule>, BuildError> {
+    let paths: Vec<PathBuf> =
+        serde_json::from_str(TSOUP_EXTRA_MODULES).map_err(BuildError::ExtraModules)?;
+    let mut modules = Vec::with_capacity(paths.len());
+
+    for path in paths {
+        let nar_hash = run(nix().args(["hash", "path"]).arg(&path), BuildError::Hash).await?;
+        modules.push(ExtraModule {
+            path,
+            nar_hash: nar_hash.trim().to_owned(),
+        });
+    }
+
+    Ok(modules)
+}
+
+fn nix() -> Command {
+    let mut nix = Command::new("nix");
+    nix.args(["--extra-experimental-features", "nix-command flakes"])
+        .stdin(Stdio::null())
+        .kill_on_drop(true);
+    nix
+}
+
+async fn run(command: &mut Command, error: fn(String) -> BuildError) -> Result<String, BuildError> {
+    let output = command.output().await?;
+
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let lines: Vec<_> = stderr.lines().collect();
+        let tail = &lines[lines.len().saturating_sub(ERROR_LINES)..];
+        return Err(error(tail.join("\n")));
+    }
+
+    Ok(String::from_utf8_lossy(&output.stdout).into_owned())
 }

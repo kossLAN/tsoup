@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{Outcome, Tool, ToolError};
+use super::{Outcome, Tool, ToolError, booted};
 use crate::session::Session;
 
 pub struct RunVm;
@@ -21,10 +21,7 @@ Use it to start the VM again after it was shut down.";
     type Arguments = Arguments;
 
     async fn run(&self, session: &Session, Arguments {}: Arguments) -> Result<Outcome, ToolError> {
-        session.vm.run().await?;
-
-        Ok(Outcome::text(
-            "the VM is running and the user sees it in their preview pane",
-        ))
+        let failures = session.vm.run().await?;
+        Ok(booted(&failures))
     }
 }

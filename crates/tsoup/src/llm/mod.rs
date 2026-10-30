@@ -1,3 +1,5 @@
+use std::borrow::Cow;
+
 use reqwest::{Client, RequestBuilder, StatusCode};
 use schemars::Schema;
 use serde::{Deserialize, Serialize};
@@ -62,8 +64,8 @@ pub struct ToolDefinition {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct FunctionDefinition {
-    pub name: &'static str,
-    pub description: &'static str,
+    pub name: Cow<'static, str>,
+    pub description: Cow<'static, str>,
     pub parameters: Schema,
 }
 

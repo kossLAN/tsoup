@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{Outcome, Tool, ToolError};
+use super::{Outcome, Tool, ToolError, booted};
 use crate::session::Session;
 use crate::vm::VmKind;
 
@@ -33,10 +33,7 @@ replacing the running VM. /workspace is shared with the VM.";
         session: &Session,
         Arguments { module, kind }: Arguments,
     ) -> Result<Outcome, ToolError> {
-        session.vm.create(module, kind).await?;
-
-        Ok(Outcome::text(
-            "the VM is running and the user sees it in their preview pane",
-        ))
+        let failures = session.vm.create(module, kind).await?;
+        Ok(booted(&failures))
     }
 }

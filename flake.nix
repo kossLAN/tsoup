@@ -31,7 +31,7 @@
         tsoup-guest = pkgs.callPackage ./nix/tsoup-guest.nix { };
       });
 
-      lib.mkRunner = import ./nix/vm { inherit self nixpkgs microvm; };
+      lib = import ./nix/vm { inherit self nixpkgs microvm; };
 
       devShells = eachSystem (pkgs: {
         default = import ./shell.nix { inherit pkgs; };

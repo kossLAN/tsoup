@@ -1,10 +1,12 @@
 {
   lib,
+  stdenv,
   rustPlatform,
   fetchNpmDeps,
   npmHooks,
   nodejs_24,
   flake,
+  extraModules ? [ ],
 }:
 let
   web = lib.fileset.difference ../web (
@@ -54,7 +56,14 @@ rustPlatform.buildRustPackage {
     npmHooks.npmConfigHook
   ];
 
-  env.TSOUP_FLAKE = "path:${flake}";
+  env = {
+    TSOUP_FLAKE = "path:${flake}";
+    TSOUP_EXTRA_MODULES = builtins.toJSON extraModules;
+    TSOUP_DESCRIPTION = flake.lib.describe {
+      inherit (stdenv.hostPlatform) system;
+      inherit extraModules;
+    };
+  };
 
   meta.mainProgram = "tsoup";
 }

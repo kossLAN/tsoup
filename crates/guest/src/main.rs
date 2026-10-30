@@ -1,3 +1,5 @@
+mod mcp;
+
 use std::collections::HashMap;
 use std::io;
 use std::net::Ipv4Addr;
@@ -11,9 +13,12 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use tokio::fs::OpenOptions;
 use tokio::net::{TcpListener, TcpStream};
 use tokio::process::Command;
+use tokio::sync::OnceCell;
 use tokio_util::codec::Framed;
 use tracing_subscriber::EnvFilter;
 use tsoup_proto::{CodecError, Frame, GuestCodec, MAX_OUTPUT, PORT, Request, Response, WORKSPACE};
+
+use self::mcp::Mcp;
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -40,51 +45,71 @@ async fn run() -> Result<(), CodecError> {
         .open(Path::new("/dev/virtio-ports").join(PORT))
         .await?;
     let mut host = Framed::new(port, GuestCodec::default());
-    let mut forwards = HashMap::new();
+    let mut state = State::default();
 
     while let Some(frame) = host.next().await {
         let Frame { id, body } = frame?;
-        let body = handle(body, &mut forwards).await;
+        let body = state.handle(body).await;
         host.send(Frame { id, body }).await?;
     }
 
     Ok(())
 }
 
-async fn handle(request: Request, forwards: &mut HashMap<u16, Arc<AtomicU16>>) -> Response {
-    match request {
-        Request::Ping => Response::Pong,
-        Request::Exec {
-            command,
-            timeout_secs,
-        } => exec(&command, Duration::from_secs(timeout_secs)).await,
-        Request::Spawn { command } => spawn(&command),
-        Request::Forward { from, to } => forward(from, to, forwards).await,
-    }
+#[derive(Default)]
+struct State {
+    forwards: HashMap<u16, Arc<AtomicU16>>,
+    mcp: OnceCell<Mcp>,
 }
 
-async fn forward(from: u16, to: u16, forwards: &mut HashMap<u16, Arc<AtomicU16>>) -> Response {
-    if let Err(error) = TcpStream::connect(("localhost", to)).await {
-        return Response::Failed {
-            message: format!("nothing accepts connections on port {to}: {error}"),
-        };
+impl State {
+    async fn handle(&mut self, request: Request) -> Response {
+        match request {
+            Request::Ping => Response::Pong,
+            Request::Exec {
+                command,
+                timeout_secs,
+            } => exec(&command, Duration::from_secs(timeout_secs)).await,
+            Request::Spawn { command } => spawn(&command),
+            Request::Forward { from, to } => self.forward(from, to).await,
+            Request::McpTools => self.mcp.get_or_init(Mcp::start).await.tools().await,
+            Request::McpCall {
+                server,
+                tool,
+                arguments,
+            } => {
+                self.mcp
+                    .get_or_init(Mcp::start)
+                    .await
+                    .call(&server, tool, arguments)
+                    .await
+            },
+        }
     }
 
-    if let Some(target) = forwards.get(&from) {
-        target.store(to, Ordering::Relaxed);
-        return Response::Forwarded;
-    }
+    async fn forward(&mut self, from: u16, to: u16) -> Response {
+        if let Err(error) = TcpStream::connect(("localhost", to)).await {
+            return Response::Failed {
+                message: format!("nothing accepts connections on port {to}: {error}"),
+            };
+        }
 
-    match TcpListener::bind((Ipv4Addr::UNSPECIFIED, from)).await {
-        Ok(listener) => {
-            let target = Arc::new(AtomicU16::new(to));
-            tokio::spawn(relay(listener, Arc::clone(&target)));
-            forwards.insert(from, target);
-            Response::Forwarded
-        },
-        Err(error) => Response::Failed {
-            message: format!("listening on port {from}: {error}"),
-        },
+        if let Some(target) = self.forwards.get(&from) {
+            target.store(to, Ordering::Relaxed);
+            return Response::Forwarded;
+        }
+
+        match TcpListener::bind((Ipv4Addr::UNSPECIFIED, from)).await {
+            Ok(listener) => {
+                let target = Arc::new(AtomicU16::new(to));
+                tokio::spawn(relay(listener, Arc::clone(&target)));
+                self.forwards.insert(from, target);
+                Response::Forwarded
+            },
+            Err(error) => Response::Failed {
+                message: format!("listening on port {from}: {error}"),
+            },
+        }
     }
 }
 
