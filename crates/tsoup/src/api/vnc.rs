@@ -11,23 +11,26 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use super::{ApiError, AppState};
+use crate::vm::Protocol;
 
 const READ_CHUNK: usize = 64 * 1024;
 
-pub async fn display(
+pub async fn vnc(
     State(state): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path((id, surface)): Path<(Uuid, String)>,
     upgrade: WebSocketUpgrade,
 ) -> Result<Response, ApiError> {
     let session = state.session(id).await?;
-    let vnc = UnixStream::connect(session.vm.display_socket())
-        .await
-        .map_err(|_| {
-            ApiError::new(
-                StatusCode::SERVICE_UNAVAILABLE,
-                "the VM display is not available",
-            )
-        })?;
+    let socket = session
+        .vm
+        .socket(&surface, Protocol::Vnc)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "the VM serves no such display"))?;
+    let vnc = UnixStream::connect(socket).await.map_err(|_| {
+        ApiError::new(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "the VM display is not available",
+        )
+    })?;
 
     let shutdown = state.shutdown.clone();
 

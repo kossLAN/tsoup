@@ -22,6 +22,7 @@ pub enum Request {
     Ping,
     Exec { command: String, timeout_secs: u64 },
     Spawn { command: String },
+    Forward { from: u16, to: u16 },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -35,6 +36,7 @@ pub enum Response {
     },
     TimedOut,
     Spawned,
+    Forwarded,
     Failed {
         message: String,
     },

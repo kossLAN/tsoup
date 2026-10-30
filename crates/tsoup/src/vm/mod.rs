@@ -1,4 +1,5 @@
 mod build;
+mod surface;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -15,11 +16,11 @@ use tokio_util::codec::Framed;
 use tsoup_proto::{CodecError, Frame, HostCodec, Request, Response};
 
 use self::build::RUNNER_LINK;
-pub use self::build::{BuildError, Builder};
+pub use self::build::{BuildError, Builder, VmKind};
+pub use self::surface::{Protocol, Surface};
 use crate::session::{Event, WORKSPACE_DIR};
 
 const AGENT_SOCKET: &str = "agent.sock";
-const DISPLAY_SOCKET: &str = "vnc.sock";
 const CONSOLE_LOG: &str = "console.log";
 const BOOT_TIMEOUT: Duration = Duration::from_secs(180);
 
@@ -29,7 +30,7 @@ pub enum VmState {
     Stopped,
     Building,
     Booting,
-    Running,
+    Running { surfaces: Vec<Surface> },
     Failed { message: String },
 }
 
@@ -46,6 +47,8 @@ pub enum VmError {
     Build(#[from] BuildError),
     #[error("starting the VM: {0}")]
     Io(#[from] io::Error),
+    #[error("reading the VM surfaces: {0}")]
+    Surfaces(#[from] serde_json::Error),
     #[error("the VM exited while booting ({0}), see {CONSOLE_LOG}")]
     Exited(ExitStatus),
     #[error("the VM did not boot within {} seconds, see {CONSOLE_LOG}", BOOT_TIMEOUT.as_secs())]
@@ -56,10 +59,16 @@ pub enum VmError {
     AlreadyRunning,
     #[error("no VM has been built yet, call create_vm first")]
     NotBuilt,
+    #[error("the VM cannot show websites, rebuild it with create_vm")]
+    NoWebsite,
     #[error("talking to the guest agent: {0}")]
     Guest(#[from] CodecError),
     #[error("the guest agent hung up")]
     Disconnected,
+    #[error("the guest agent failed: {0}")]
+    GuestFailed(String),
+    #[error("the guest agent sent an unexpected response")]
+    UnexpectedResponse,
 }
 
 pub struct Vm {
@@ -99,25 +108,39 @@ impl Vm {
         self.status.borrow().clone()
     }
 
-    pub fn display_socket(&self) -> PathBuf {
-        self.runtime.join(DISPLAY_SOCKET)
+    pub fn socket(&self, surface: &str, protocol: Protocol) -> Option<PathBuf> {
+        let VmState::Running { surfaces } = &self.status.borrow().state else {
+            return None;
+        };
+
+        surfaces
+            .iter()
+            .find(|candidate| candidate.name == surface && candidate.protocol == protocol)
+            .map(|surface| surface.socket.clone())
     }
 
-    pub async fn create(&self, module: Option<String>) -> Result<(), VmError> {
+    pub async fn create(
+        &self,
+        module: Option<String>,
+        kind: Option<VmKind>,
+    ) -> Result<(), VmError> {
         let mut running = self.running.lock().await;
 
         self.set_state(VmState::Building);
 
-        let runner = match self.builder.build(&self.dir, module).await {
+        let runner = match self
+            .builder
+            .build(&self.dir, &self.runtime, module, kind)
+            .await
+        {
             Ok(runner) => runner,
             Err(error) => {
-                self.set_state(if running.is_some() {
-                    VmState::Running
-                } else {
-                    VmState::Failed {
+                self.set_state(running.as_ref().map_or_else(
+                    || VmState::Failed {
                         message: error.to_string(),
-                    }
-                });
+                    },
+                    Running::state,
+                ));
                 return Err(error.into());
             },
         };
@@ -149,8 +172,8 @@ impl Vm {
 
         match Running::launch(&self.dir, &self.runtime, runner).await {
             Ok(launched) => {
+                self.set_state(launched.state());
                 *running = Some(launched);
-                self.set_state(VmState::Running);
                 Ok(())
             },
             Err(error) => {
@@ -182,22 +205,55 @@ impl Vm {
             self.status.borrow().state,
             VmState::Building | VmState::Booting
         ) {
-            self.set_state(if running.is_some() {
-                VmState::Running
-            } else {
-                VmState::Stopped
-            });
+            self.set_state(running.as_ref().map_or(VmState::Stopped, Running::state));
         }
     }
 
     pub async fn request(&self, request: Request) -> Result<Response, VmError> {
+        self.exchange(&mut *self.running.lock().await, request)
+            .await
+    }
+
+    pub async fn show_website(&self, port: u16) -> Result<(), VmError> {
         let mut running = self.running.lock().await;
+        let from = running
+            .as_ref()
+            .ok_or(VmError::NotRunning)?
+            .website()
+            .and_then(|website| website.port)
+            .ok_or(VmError::NoWebsite)?;
+
+        match self
+            .exchange(&mut running, Request::Forward { from, to: port })
+            .await?
+        {
+            Response::Forwarded => {},
+            Response::Failed { message } => return Err(VmError::GuestFailed(message)),
+            _ => return Err(VmError::UnexpectedResponse),
+        }
+
+        if let Some(vm) = running.as_mut() {
+            if let Some(website) = vm.website_mut() {
+                website.target = Some(port);
+            }
+
+            self.set_state(vm.state());
+        }
+
+        Ok(())
+    }
+
+    async fn exchange(
+        &self,
+        running: &mut Option<Running>,
+        request: Request,
+    ) -> Result<Response, VmError> {
         let vm = running.as_mut().ok_or(VmError::NotRunning)?;
 
         match vm.guest.request(request).await {
             Ok(response) => Ok(response),
             Err(error) => {
-                stop(&mut running).await;
+                stop(running).await;
                 self.set_state(VmState::Failed {
                     message: error.to_string(),
                 });
@@ -229,14 +285,21 @@ async fn stop(running: &mut Option<Running>) {
 struct Running {
     process: Child,
     guest: Guest,
+    surfaces: Vec<Surface>,
 }
 
 impl Running {
     async fn launch(dir: &Path, runtime: &Path, runner: &Path) -> Result<Self, VmError> {
+        let surfaces = Surface::load(runner).await?;
         tokio::fs::create_dir_all(runtime).await?;
 
-        for stale in [AGENT_SOCKET, DISPLAY_SOCKET, WORKSPACE_DIR] {
-            match tokio::fs::remove_file(runtime.join(stale)).await {
+        let stale = surfaces
+            .iter()
+            .map(|surface| surface.socket.clone())
+            .chain([AGENT_SOCKET, WORKSPACE_DIR].map(|name| runtime.join(name)));
+
+        for path in stale {
+            match tokio::fs::remove_file(path).await {
                 Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error.into()),
                 _ => {},
             }
@@ -271,7 +334,30 @@ impl Running {
             status = process.wait() => return Err(VmError::Exited(status?)),
         };
 
-        Ok(Self { process, guest })
+        Ok(Self {
+            process,
+            guest,
+            surfaces,
+        })
+    }
+
+    fn state(&self) -> VmState {
+        VmState::Running {
+            surfaces: self
+                .surfaces
+                .iter()
+                .filter(|surface| surface.visible())
+                .cloned()
+                .collect(),
+        }
+    }
+
+    fn website(&self) -> Option<&Surface> {
+        self.surfaces.iter().find(|surface| surface.forwarded)
+    }
+
+    fn website_mut(&mut self) -> Option<&mut Surface> {
+        self.surfaces.iter_mut().find(|surface| surface.forwarded)
     }
 }
 

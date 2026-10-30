@@ -1,5 +1,6 @@
-mod display;
 mod error;
+mod proxy;
+mod vnc;
 mod web;
 
 use std::sync::Arc;
@@ -58,8 +59,12 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions/{id}/turns", post(start_turn))
         .route("/api/sessions/{id}/turn", delete(cancel_turn))
         .route("/api/sessions/{id}/vm", post(start_vm).delete(destroy_vm))
-        .route("/api/sessions/{id}/display", get(display::display))
+        .route("/api/sessions/{id}/vnc/{surface}", get(vnc::vnc))
         .fallback(web::serve)
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            proxy::route,
+        ))
         .with_state(state)
 }
 

@@ -2,7 +2,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use serde::Serialize;
+use schemars::JsonSchema;
+use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
 const ENVIRONMENT_FLAKE: &str = include_str!("flake.nix");
@@ -12,6 +13,7 @@ const TSOUP_FLAKE: &str = match option_env!("TSOUP_FLAKE") {
 };
 const EMPTY_MODULE: &str = "{ }\n";
 const ENVIRONMENT_DIR: &str = "environment";
+const HOST_FILE: &str = "host.json";
 pub(super) const RUNNER_LINK: &str = "runner";
 const ERROR_LINES: usize = 60;
 
@@ -25,9 +27,19 @@ pub enum BuildError {
     Failed(String),
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum VmKind {
+    Headless,
+    #[default]
+    Graphical,
+}
+
+#[derive(Serialize, Deserialize)]
 struct Host {
     uid: u32,
+    kind: VmKind,
+    runtime: PathBuf,
 }
 
 pub struct Builder {
@@ -39,13 +51,29 @@ impl Builder {
         Self { uid }
     }
 
-    pub async fn build(&self, dir: &Path, module: Option<String>) -> Result<PathBuf, BuildError> {
+    pub async fn build(
+        &self,
+        dir: &Path,
+        runtime: &Path,
+        module: Option<String>,
+        kind: Option<VmKind>,
+    ) -> Result<PathBuf, BuildError> {
         let environment = dir.join(ENVIRONMENT_DIR);
         tokio::fs::create_dir_all(&environment).await?;
         tokio::fs::write(environment.join("flake.nix"), ENVIRONMENT_FLAKE).await?;
+
+        let host = environment.join(HOST_FILE);
+        let kind = match kind {
+            Some(kind) => kind,
+            None => last_kind(&host).await,
+        };
         tokio::fs::write(
-            environment.join("host.json"),
-            serde_json::to_vec(&Host { uid: self.uid })?,
+            &host,
+            serde_json::to_vec(&Host {
+                uid: self.uid,
+                kind,
+                runtime: runtime.to_owned(),
+            })?,
         )
         .await?;
 
@@ -87,4 +115,13 @@ impl Builder {
 
         Ok(runner)
     }
+}
+
+async fn last_kind(host: &Path) -> VmKind {
+    tokio::fs::read(host)
+        .await
+        .ok()
+        .and_then(|host| serde_json::from_slice::<Host>(&host).ok())
+        .map(|host| host.kind)
+        .unwrap_or_default()
 }

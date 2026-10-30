@@ -56,7 +56,7 @@ impl Tool for Shell {
             Response::Spawned => Ok(Outcome::text("started in the background")),
             Response::TimedOut => Err(ToolError::TimedOut(TIMEOUT_SECS)),
             Response::Failed { message } => Err(ToolError::Guest(message)),
-            Response::Pong => Err(ToolError::UnexpectedResponse),
+            Response::Pong | Response::Forwarded => Err(ToolError::UnexpectedResponse),
         }
     }
 }

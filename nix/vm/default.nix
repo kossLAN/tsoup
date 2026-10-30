@@ -6,14 +6,19 @@
 {
   system,
   uid,
+  kind,
+  runtime,
   module,
 }:
 let
   inherit (nixpkgs) lib;
 
-  base = import ./base.nix {
-    inherit uid;
-    guestAgent = self.packages.${system}.tsoup-guest;
+  pkgs = nixpkgs.legacyPackages.${system};
+  guestAgent = self.packages.${system}.tsoup-guest;
+
+  kinds = {
+    headless = { };
+    graphical = import ./graphical.nix { inherit guestAgent; };
   };
 
   nixos =
@@ -21,7 +26,9 @@ let
     lib.nixosSystem {
       modules = [
         microvm.nixosModules.microvm
-        base
+        (import ./surfaces.nix { inherit runtime; })
+        (import ./base.nix { inherit uid guestAgent; })
+        kinds.${kind}
         { nixpkgs.hostPlatform = system; }
       ]
       ++ extraModules;
@@ -39,14 +46,26 @@ let
     in
     assert lib.assertMsg definedByMicrovm "environment modules must not set microvm.storeDisk";
     untrusted.config.microvm.storeDisk;
-in
-microvm.lib.buildRunner {
-  pkgs = nixpkgs.legacyPackages.${system};
-  toplevel = untrusted.config.system.build.toplevel;
 
-  microvmConfig = trusted.config.microvm // {
-    inherit (trusted.config.networking) hostName;
-    inherit (untrusted.config.microvm) kernelParams;
-    inherit storeDisk;
+  runner = microvm.lib.buildRunner {
+    inherit pkgs;
+    toplevel = untrusted.config.system.build.toplevel;
+
+    microvmConfig = trusted.config.microvm // {
+      inherit (trusted.config.networking) hostName;
+      inherit (untrusted.config.microvm) kernelParams;
+      inherit storeDisk;
+    };
   };
+
+  surfaces = pkgs.writeTextDir "share/tsoup/surfaces.json" (
+    builtins.toJSON (lib.attrValues trusted.config.tsoup.surfaces)
+  );
+in
+pkgs.symlinkJoin {
+  name = "tsoup-runner";
+  paths = [
+    runner
+    surfaces
+  ];
 }

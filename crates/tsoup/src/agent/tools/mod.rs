@@ -4,6 +4,7 @@ mod edit_file;
 mod read_file;
 mod run_vm;
 mod shell;
+mod show_website;
 mod workspace;
 mod write_file;
 
@@ -20,6 +21,7 @@ use self::edit_file::EditFile;
 use self::read_file::ReadFile;
 use self::run_vm::RunVm;
 use self::shell::Shell;
+use self::show_website::ShowWebsite;
 use self::write_file::WriteFile;
 use crate::llm::{FunctionDefinition, ToolCall, ToolDefinition, ToolKind};
 use crate::session::{FileDiff, Session};
@@ -149,6 +151,7 @@ impl Toolbox {
             Box::new(RunVm),
             Box::new(DestroyVm),
             Box::new(Shell),
+            Box::new(ShowWebsite),
             Box::new(ReadFile),
             Box::new(WriteFile),
             Box::new(EditFile),

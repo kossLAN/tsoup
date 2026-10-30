@@ -15,8 +15,8 @@ pub struct Arguments {}
 
 impl Tool for RunVm {
     const NAME: &'static str = "run_vm";
-    const DESCRIPTION: &'static str = "Boot the VM that create_vm last built, without rebuilding \
-                                       it. Use it to start the VM again after it was shut down.";
+    const DESCRIPTION: &'static str = "Boot the VM create_vm last built, without rebuilding it.
+Use it to start the VM again after it was shut down.";
 
     type Arguments = Arguments;
 
@@ -24,7 +24,7 @@ impl Tool for RunVm {
         session.vm.run().await?;
 
         Ok(Outcome::text(
-            "the VM is running and its display is visible to the user",
+            "the VM is running and the user sees it in their preview pane",
         ))
     }
 }

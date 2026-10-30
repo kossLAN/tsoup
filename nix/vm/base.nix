@@ -3,6 +3,7 @@
   guestAgent,
 }:
 {
+  config,
   lib,
   pkgs,
   ...
@@ -10,94 +11,104 @@
 let
   session = {
     user = "agent";
-    command = lib.escapeShellArgs [
-      (lib.getExe' pkgs.dbus "dbus-run-session")
-      (lib.getExe' pkgs.kdePackages.kwin "kwin_wayland")
-      "--drm"
-      "--no-lockscreen"
-      "--xwayland"
-      "--exit-with-session=${lib.getExe guestAgent}"
-    ];
+    command = lib.escapeShellArgs config.tsoup.session;
   };
 in
 {
-  system.stateVersion = lib.mkForce lib.trivial.release;
-  networking.hostName = lib.mkForce "tsoup";
-  documentation.enable = lib.mkForce false;
-  fonts.enableDefaultPackages = lib.mkForce true;
-
-  microvm = {
-    hypervisor = lib.mkForce "qemu";
-    mem = lib.mkForce 4096;
-    vcpu = lib.mkForce 4;
-    socket = lib.mkForce null;
-
-    interfaces = lib.mkForce [
-      {
-        type = "user";
-        id = "net0";
-        mac = "02:00:00:00:00:01";
-      }
-    ];
-
-    shares = lib.mkForce [
-      {
-        proto = "9p";
-        tag = "workspace";
-        source = "workspace";
-        mountPoint = "/workspace";
-      }
-    ];
-
-    qemu.extraArgs = lib.mkForce [
-      "-vnc"
-      "unix:vnc.sock"
-      "-device"
-      "virtio-gpu-pci"
-      "-device"
-      "virtio-keyboard-pci"
-      "-device"
-      "virtio-tablet-pci"
-      "-chardev"
-      "socket,id=agent,path=agent.sock"
-      "-device"
-      "virtio-serial-pci"
-      "-device"
-      "virtserialport,chardev=agent,name=tsoup.agent"
-    ];
+  options.tsoup.session = lib.mkOption {
+    type = lib.types.listOf lib.types.str;
+    internal = true;
   };
 
-  boot.kernelModules = [ "virtio_gpu" ];
-
-  users.users.agent = {
-    isNormalUser = lib.mkForce true;
-    uid = lib.mkForce uid;
-    extraGroups = [
-      "wheel"
-      "video"
-      "input"
+  config = {
+    tsoup.session = lib.mkDefault [
+      (lib.getExe' pkgs.dbus "dbus-run-session")
+      (lib.getExe guestAgent)
     ];
-  };
 
-  security.sudo.wheelNeedsPassword = lib.mkForce false;
+    tsoup.surfaces = {
+      terminal = {
+        label = "Terminal";
+        protocol = "http";
+        port = 7681;
+      };
 
-  services.udev.extraRules = ''
-    SUBSYSTEM=="virtio-ports", ATTR{name}=="tsoup.agent", OWNER="agent"
-  '';
+      website = {
+        label = "Website";
+        protocol = "http";
+        port = 7680;
+        forwarded = true;
+      };
+    };
 
-  services.greetd = {
-    enable = lib.mkForce true;
-    settings = {
-      initial_session = lib.mkForce session;
-      default_session = lib.mkForce session;
+    system.stateVersion = lib.mkForce lib.trivial.release;
+    networking.hostName = lib.mkForce "tsoup";
+    documentation.enable = lib.mkForce false;
+
+    microvm = {
+      hypervisor = lib.mkForce "qemu";
+      mem = lib.mkForce 4096;
+      vcpu = lib.mkForce 4;
+      socket = lib.mkForce null;
+
+      shares = lib.mkForce [
+        {
+          proto = "9p";
+          tag = "workspace";
+          source = "workspace";
+          mountPoint = "/workspace";
+        }
+      ];
+
+      qemu.extraArgs = lib.mkForce [
+        "-chardev"
+        "socket,id=agent,path=agent.sock"
+        "-device"
+        "virtio-serial-pci"
+        "-device"
+        "virtserialport,chardev=agent,name=tsoup.agent"
+      ];
+    };
+
+    users.users.agent = {
+      isNormalUser = lib.mkForce true;
+      uid = lib.mkForce uid;
+      extraGroups = [ "wheel" ];
+    };
+
+    security.sudo.wheelNeedsPassword = lib.mkForce false;
+
+    services.udev.extraRules = ''
+      SUBSYSTEM=="virtio-ports", ATTR{name}=="tsoup.agent", OWNER="agent"
+    '';
+
+    services.greetd = {
+      enable = lib.mkForce true;
+      settings = {
+        initial_session = lib.mkForce session;
+        default_session = lib.mkForce session;
+      };
+    };
+
+    systemd.services.tsoup-terminal = {
+      wantedBy = [ "multi-user.target" ];
+      unitConfig.RequiresMountsFor = "/workspace";
+
+      serviceConfig = {
+        User = "agent";
+        WorkingDirectory = "/workspace";
+        Restart = "always";
+        ExecStart = lib.escapeShellArgs [
+          (lib.getExe pkgs.ttyd)
+          "--writable"
+          "--port"
+          (toString config.tsoup.surfaces.terminal.port)
+          "--client-option"
+          "disableLeaveAlert=true"
+          (lib.getExe pkgs.bashInteractive)
+          "--login"
+        ];
+      };
     };
   };
-
-  hardware.graphics.enable = lib.mkForce true;
-  programs.xwayland.enable = lib.mkForce true;
-
-  environment.systemPackages = [
-    pkgs.foot
-    pkgs.kdePackages.breeze
-  ];
 }

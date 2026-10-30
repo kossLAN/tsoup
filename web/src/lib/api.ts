@@ -22,11 +22,18 @@ export type Entry =
 	| { kind: 'assistant'; text: string | null; tool_calls: ToolCall[] }
 	| { kind: 'tool'; call_id: string; output: string; error: boolean; diff: FileDiff | null };
 
+export type Surface = {
+	name: string;
+	label: string;
+	protocol: 'http' | 'vnc';
+	target: number | null;
+};
+
 export type VmStatus = (
 	| { state: 'stopped' }
 	| { state: 'building' }
 	| { state: 'booting' }
-	| { state: 'running' }
+	| { state: 'running'; surfaces: Surface[] }
 	| { state: 'failed'; message: string }
 ) & { built: boolean };
 
@@ -84,9 +91,16 @@ export function sessionEvents(id: string): EventSource {
 	return new EventSource(`/api/sessions/${id}/events`);
 }
 
-export function displayUrl(id: string): string {
+export function vncUrl(id: string, surface: string): string {
 	const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-	return `${scheme}://${location.host}/api/sessions/${id}/display`;
+	return `${scheme}://${location.host}/api/sessions/${id}/vnc/${surface}`;
+}
+
+export function surfaceUrl(id: string, surface: string): string {
+	const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
+	const host = loopback ? 'localhost' : location.hostname;
+	const port = location.port ? `:${location.port}` : '';
+	return `${location.protocol}//${surface}.${id}.${host}${port}/`;
 }
 
 export type Settings = {

@@ -7,15 +7,20 @@ use crate::llm::{LlmClient, LlmError, Message};
 use crate::session::{Entry, Event, Session, SessionError};
 use crate::settings::SettingsStore;
 
-const SYSTEM_PROMPT: &str = "You are a coding agent working in a session workspace. \
-The workspace is at /workspace and persists for the whole session. \
-read_file, write_file and edit_file work on the workspace directly and need no VM. \
-To run anything, call create_vm with a NixOS module that installs what you need, then use shell. \
-The VM is a NixOS microVM running a KWin Wayland session that the user watches live, \
-so graphical programs you start with shell in the background appear on their screen. \
-The VM is ephemeral: everything outside /workspace is lost when it is destroyed or replaced. \
-Calling create_vm again rebuilds the VM from a new module, so add packages that way \
-instead of installing them imperatively. \
+const SYSTEM_PROMPT: &str = "You are a coding agent working in a session workspace.
+The workspace is at /workspace and persists for the whole session.
+read_file, write_file and edit_file work on the workspace directly and need no VM.
+To run anything, call create_vm with a NixOS module that installs what you need, then use shell.
+The VM is a NixOS microVM, and create_vm's kind argument picks headless or graphical.
+A graphical VM runs a KWin Wayland session that the user watches live,
+so graphical programs you start with shell in the background appear on their screen.
+A headless VM has no display, use it for command line programs and web apps.
+The user always has a terminal into the VM in their preview pane.
+To show them a website served from the VM, start its server in the background with shell
+and call show_website with its port.
+The VM is ephemeral: everything outside /workspace is lost when it is destroyed or replaced.
+Calling create_vm again rebuilds the VM from a new module,
+so add packages that way instead of installing them imperatively.
 To start a VM that is not running without rebuilding it, call run_vm.";
 
 const INTERRUPTED: &str = "the tool call was interrupted before it finished";

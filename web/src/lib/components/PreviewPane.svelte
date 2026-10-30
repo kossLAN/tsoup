@@ -1,6 +1,13 @@
 <script lang="ts">
-	import type { VmStatus } from '$lib/api';
-	import { CircleNotchIcon, PowerIcon, WarningCircleIcon, XIcon } from '$lib/icons';
+	import { surfaceUrl, type Surface, type VmStatus } from '$lib/api';
+	import {
+		ArrowClockwiseIcon,
+		ArrowSquareOutIcon,
+		CircleNotchIcon,
+		PowerIcon,
+		WarningCircleIcon,
+		XIcon
+	} from '$lib/icons';
 
 	let {
 		session,
@@ -23,12 +30,61 @@
 		running: 'Running',
 		failed: 'Failed'
 	};
+
+	const surfaces = $derived(status.state === 'running' ? status.surfaces : []);
+
+	let view = $derived(
+		(
+			surfaces.find((surface) => surface.target !== null) ??
+			surfaces.find((surface) => surface.protocol === 'vnc') ??
+			surfaces[0]
+		)?.name
+	);
+	const current = $derived(surfaces.find((surface) => surface.name === view));
+	const reloads = $state<Record<string, number>>({});
+
+	function source(surface: Surface): string {
+		return surface.protocol === 'vnc'
+			? `/vnc/${session}/${surface.name}`
+			: surfaceUrl(session, surface.name);
+	}
+
+	function reload(surface: Surface) {
+		reloads[surface.name] = (reloads[surface.name] ?? 0) + 1;
+	}
 </script>
 
 <section>
 	<header>
 		<span class="title">VM</span>
 		<span class="state {status.state}">{label[status.state]}</span>
+		{#if current?.protocol === 'http'}
+			<button class="icon-button" title="Reload" onclick={() => reload(current)}>
+				<ArrowClockwiseIcon size={14} />
+			</button>
+			<a
+				class="icon-button"
+				title="Open in a new tab"
+				href={surfaceUrl(session, current.name)}
+				target="_blank"
+			>
+				<ArrowSquareOutIcon size={14} />
+			</a>
+		{/if}
+		{#if surfaces.length > 1}
+			<div class="views" role="tablist">
+				{#each surfaces as surface (surface.name)}
+					<button
+						role="tab"
+						aria-selected={view === surface.name}
+						class:selected={view === surface.name}
+						onclick={() => (view = surface.name)}
+					>
+						{surface.label}
+					</button>
+				{/each}
+			</div>
+		{/if}
 		<button
 			class="icon-button destroy"
 			title="Destroy VM"
@@ -44,9 +100,16 @@
 
 	<div class="screen">
 		{#if status.state === 'running'}
-			{#key boots}
-				<iframe src="/display/{session}" title="VM display"></iframe>
-			{/key}
+			{#each surfaces as surface (surface.name)}
+				{#key `${boots} ${surface.target} ${reloads[surface.name]}`}
+					<iframe
+						class:hidden={view !== surface.name}
+						src={source(surface)}
+						title={surface.label}
+						allow="clipboard-read; clipboard-write"
+					></iframe>
+				{/key}
+			{/each}
 		{:else if status.state === 'failed'}
 			<div class="message failure">
 				<WarningCircleIcon size={18} />
@@ -116,6 +179,43 @@
 	iframe {
 		flex: 1;
 		border: none;
+	}
+
+	iframe.hidden {
+		display: none;
+	}
+
+	a.icon-button {
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		color: inherit;
+		transition: background var(--duration-fast) linear;
+	}
+
+	a.icon-button:hover {
+		background: var(--hover);
+	}
+
+	.views {
+		display: flex;
+		padding: 2px;
+		gap: 2px;
+		border-radius: var(--radius-control);
+		background: var(--base);
+	}
+
+	.views button {
+		height: 22px;
+		padding: 0 8px;
+		border-radius: var(--radius-input);
+		font-size: var(--font-label);
+		color: var(--text-secondary);
+	}
+
+	.views button.selected {
+		background: var(--alternate-base);
+		color: var(--window-text);
 	}
 
 	.message {

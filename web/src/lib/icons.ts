@@ -1,3 +1,5 @@
+export { default as ArrowClockwiseIcon } from 'phosphor-svelte/lib/ArrowClockwiseIcon';
+export { default as ArrowSquareOutIcon } from 'phosphor-svelte/lib/ArrowSquareOutIcon';
 export { default as CaretRightIcon } from 'phosphor-svelte/lib/CaretRightIcon';
 export { default as CircleNotchIcon } from 'phosphor-svelte/lib/CircleNotchIcon';
 export { default as CubeIcon } from 'phosphor-svelte/lib/CubeIcon';

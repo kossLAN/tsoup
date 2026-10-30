@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { displayUrl } from '$lib/api';
+	import { vncUrl } from '$lib/api';
 	import RFB from '@novnc/novnc';
 
 	let screen: HTMLElement;
 	let connected = $state(false);
 
 	$effect(() => {
-		const rfb = new RFB(screen, displayUrl(page.params.id ?? ''));
+		const rfb = new RFB(screen, vncUrl(page.params.id ?? '', page.params.surface ?? ''));
 		rfb.scaleViewport = true;
 		rfb.resizeSession = true;
 		rfb.background = '#000';

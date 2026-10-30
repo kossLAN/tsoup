@@ -2065,6 +2065,8 @@ dependencies = [
  "cap-std",
  "clap",
  "futures-util",
+ "hyper",
+ "hyper-util",
  "reqwest",
  "rust-embed",
  "schemars",

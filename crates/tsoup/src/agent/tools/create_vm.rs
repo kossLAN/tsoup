@@ -3,6 +3,7 @@ use serde::Deserialize;
 
 use super::{Outcome, Tool, ToolError};
 use crate::session::Session;
+use crate::vm::VmKind;
 
 pub struct CreateVm;
 
@@ -13,24 +14,29 @@ pub struct Arguments {
     )]
     #[serde(default)]
     module: Option<String>,
+    #[schemars(
+        description = "headless suits command line programs and web apps, graphical adds a KWin Wayland desktop the user watches live. Omit it to keep the last kind."
+    )]
+    #[serde(default)]
+    kind: Option<VmKind>,
 }
 
 impl Tool for CreateVm {
     const NAME: &'static str = "create_vm";
-    const DESCRIPTION: &'static str = "Build a microVM from a NixOS module and boot it, replacing \
-                                       the running VM. /workspace is shared with the VM.";
+    const DESCRIPTION: &'static str = "Build a microVM from a NixOS module and boot it,
+replacing the running VM. /workspace is shared with the VM.";
 
     type Arguments = Arguments;
 
     async fn run(
         &self,
         session: &Session,
-        Arguments { module }: Arguments,
+        Arguments { module, kind }: Arguments,
     ) -> Result<Outcome, ToolError> {
-        session.vm.create(module).await?;
+        session.vm.create(module, kind).await?;
 
         Ok(Outcome::text(
-            "the VM is running and its display is visible to the user",
+            "the VM is running and the user sees it in their preview pane",
         ))
     }
 }

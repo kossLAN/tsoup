@@ -3,7 +3,7 @@
 	import { cancelTurn, destroyVm, getSettings, startTurn, startVm } from '$lib/api';
 	import Composer from '$lib/components/Composer.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
-	import VmPane from '$lib/components/VmPane.svelte';
+	import PreviewPane from '$lib/components/PreviewPane.svelte';
 	import { MonitorIcon, PlayIcon } from '$lib/icons';
 	import { Session } from '$lib/session.svelte';
 	import { onMount } from 'svelte';
@@ -75,7 +75,7 @@
 
 	{#if active && !hidden}
 		<div class="pane" transition:fly={{ x: 80, duration: 200, easing: cubicOut }}>
-			<VmPane
+			<PreviewPane
 				session={session.id}
 				status={session.vm}
 				boots={session.boots}
