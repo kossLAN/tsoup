@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { ArrowElbowDownLeftIcon, StopIcon } from '$lib/icons';
+	import { tooltip } from '$lib/popup';
 
 	let {
 		busy = false,
@@ -52,15 +53,15 @@
 			rows="1"
 			placeholder="Ask the agent"></textarea>
 		{#if busy && onstop}
-			<button class="icon-button" title="Stop" onclick={onstop}>
+			<button class="icon-button" onclick={onstop} {@attach tooltip('Stop')}>
 				<StopIcon size={16} />
 			</button>
 		{:else}
 			<button
 				class="icon-button"
-				title="Send"
 				disabled={!text.trim() || sending}
 				onclick={send}
+				{@attach tooltip('Send')}
 			>
 				<ArrowElbowDownLeftIcon size={16} />
 			</button>

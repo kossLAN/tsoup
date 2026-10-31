@@ -7,9 +7,7 @@
 
 	let open = $state(false);
 
-	onMount(() => {
-		sessions.refresh();
-	});
+	onMount(() => sessions.connect());
 </script>
 
 <Sidebar bind:open />

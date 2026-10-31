@@ -12,7 +12,7 @@ use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 pub use self::entry::{Action, Entry, Event, FileDiff};
-use crate::vm::{Builder, Vm};
+use crate::vm::{Builder, Vm, VmStatus};
 
 const SESSION_FILE: &str = "session.json";
 pub const WORKSPACE_DIR: &str = "workspace";
@@ -36,6 +36,54 @@ pub enum SessionError {
 pub struct SessionSummary {
     pub id: Uuid,
     pub title: String,
+    pub busy: bool,
+    pub vm: VmStatus,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum ListEvent {
+    Snapshot { sessions: Vec<SessionSummary> },
+    Busy { id: Uuid, busy: bool },
+    Vm { id: Uuid, status: VmStatus },
+}
+
+#[derive(Clone)]
+pub struct Events {
+    id: Uuid,
+    session: broadcast::Sender<Event>,
+    list: broadcast::Sender<ListEvent>,
+}
+
+impl Events {
+    pub fn emit(&self, event: Event) {
+        let change = match &event {
+            Event::TurnStarted => Some(ListEvent::Busy {
+                id: self.id,
+                busy: true,
+            }),
+            Event::TurnFinished | Event::TurnFailed { .. } | Event::TurnCancelled => {
+                Some(ListEvent::Busy {
+                    id: self.id,
+                    busy: false,
+                })
+            },
+            Event::Vm { status } => Some(ListEvent::Vm {
+                id: self.id,
+                status: status.clone(),
+            }),
+            _ => None,
+        };
+
+        let _ = self.session.send(event);
+        if let Some(change) = change {
+            let _ = self.list.send(change);
+        }
+    }
+
+    fn subscribe(&self) -> broadcast::Receiver<Event> {
+        self.session.subscribe()
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -57,6 +105,7 @@ pub struct Sessions {
     runtime: PathBuf,
     builder: Arc<Builder>,
     by_id: RwLock<HashMap<Uuid, Arc<Session>>>,
+    changes: broadcast::Sender<ListEvent>,
 }
 
 impl Sessions {
@@ -65,6 +114,7 @@ impl Sessions {
         runtime: PathBuf,
         builder: Arc<Builder>,
     ) -> Result<Self, SessionError> {
+        let (changes, _) = broadcast::channel(EVENT_BUFFER);
         let mut sessions = HashMap::new();
         let mut dirs = tokio::fs::read_dir(&root).await?;
 
@@ -78,6 +128,7 @@ impl Sessions {
                 dir.path(),
                 runtime.join(id.to_string()),
                 Arc::clone(&builder),
+                changes.clone(),
             )
             .await
             {
@@ -93,6 +144,7 @@ impl Sessions {
             runtime,
             builder,
             by_id: RwLock::new(sessions),
+            changes,
         })
     }
 
@@ -106,6 +158,14 @@ impl Sessions {
 
         summaries.sort_by_key(|summary| Reverse(summary.id));
         summaries
+    }
+
+    pub async fn subscribe(&self) -> (ListEvent, broadcast::Receiver<ListEvent>) {
+        let receiver = self.changes.subscribe();
+        let snapshot = ListEvent::Snapshot {
+            sessions: self.list().await,
+        };
+        (snapshot, receiver)
     }
 
     pub async fn get(&self, id: Uuid) -> Result<Arc<Session>, SessionError> {
@@ -129,6 +189,7 @@ impl Sessions {
                 self.runtime.join(id.to_string()),
                 SessionData::default(),
                 Arc::clone(&self.builder),
+                self.changes.clone(),
             )
             .await,
         );
@@ -156,7 +217,7 @@ pub struct Session {
     pub vm: Vm,
     dir: PathBuf,
     data: Mutex<SessionData>,
-    events: broadcast::Sender<Event>,
+    events: Events,
     turn: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -167,8 +228,13 @@ impl Session {
         runtime: PathBuf,
         data: SessionData,
         builder: Arc<Builder>,
+        changes: broadcast::Sender<ListEvent>,
     ) -> Self {
-        let (events, _) = broadcast::channel(EVENT_BUFFER);
+        let events = Events {
+            id,
+            session: broadcast::channel(EVENT_BUFFER).0,
+            list: changes,
+        };
 
         Self {
             id,
@@ -185,9 +251,10 @@ impl Session {
         dir: PathBuf,
         runtime: PathBuf,
         builder: Arc<Builder>,
+        changes: broadcast::Sender<ListEvent>,
     ) -> Result<Self, SessionError> {
         let data = serde_json::from_slice(&tokio::fs::read(dir.join(SESSION_FILE)).await?)?;
-        Ok(Self::new(id, dir, runtime, data, builder).await)
+        Ok(Self::new(id, dir, runtime, data, builder, changes).await)
     }
 
     pub fn workspace(&self) -> PathBuf {
@@ -198,6 +265,8 @@ impl Session {
         SessionSummary {
             id: self.id,
             title: self.data.lock().await.title.clone(),
+            busy: self.busy().await,
+            vm: self.vm.status(),
         }
     }
 
@@ -249,7 +318,7 @@ impl Session {
     }
 
     pub fn emit(&self, event: Event) {
-        let _ = self.events.send(event);
+        self.events.emit(event);
     }
 
     pub async fn subscribe(&self) -> (Event, broadcast::Receiver<Event>) {

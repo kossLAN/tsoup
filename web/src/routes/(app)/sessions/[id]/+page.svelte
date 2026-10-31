@@ -6,6 +6,7 @@
 	import PreviewPane from '$lib/components/PreviewPane.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
 	import { MonitorIcon, PlayIcon } from '$lib/icons';
+	import { tooltip } from '$lib/popup';
 	import { Session } from '$lib/session.svelte';
 	import { sessions } from '$lib/sessions.svelte';
 	import { cubicOut } from 'svelte/easing';
@@ -23,6 +24,11 @@
 	$effect(() => {
 		const current = session;
 		return () => current.close();
+	});
+
+	$effect(() => {
+		sessions.view(session.id);
+		return () => sessions.view(null);
 	});
 
 	$effect(() => {
@@ -67,12 +73,20 @@
 				>{session.title || 'New session'}</span
 			>
 			{#if startable}
-				<button class="icon-button" title="Start VM" onclick={() => startVm(session.id)}>
+				<button
+					class="icon-button"
+					onclick={() => startVm(session.id)}
+					{@attach tooltip('Start VM')}
+				>
 					<PlayIcon size={16} />
 				</button>
 			{/if}
 			{#if active && hidden}
-				<button class="icon-button" title="Show VM" onclick={() => (hidden = false)}>
+				<button
+					class="icon-button"
+					onclick={() => (hidden = false)}
+					{@attach tooltip('Show VM')}
+				>
 					<MonitorIcon size={16} />
 				</button>
 			{/if}

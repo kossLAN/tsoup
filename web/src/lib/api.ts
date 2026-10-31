@@ -1,6 +1,8 @@
 export type SessionSummary = {
 	id: string;
 	title: string;
+	busy: boolean;
+	vm: VmStatus;
 };
 
 export type ToolCall = {
@@ -60,6 +62,11 @@ export type SessionEvent =
 	| { type: 'vm'; status: VmStatus }
 	| { type: 'actions'; actions: Action[] };
 
+export type ListEvent =
+	| { type: 'snapshot'; sessions: SessionSummary[] }
+	| { type: 'busy'; id: string; busy: boolean }
+	| { type: 'vm'; id: string; status: VmStatus };
+
 async function request(method: string, path: string, body?: unknown): Promise<Response> {
 	const response = await fetch(path, {
 		method,
@@ -73,8 +80,8 @@ async function request(method: string, path: string, body?: unknown): Promise<Re
 	return response;
 }
 
-export async function listSessions(): Promise<SessionSummary[]> {
-	return (await request('GET', '/api/sessions')).json();
+export function listEvents(): EventSource {
+	return new EventSource('/api/events');
 }
 
 export async function createSession(): Promise<SessionSummary> {

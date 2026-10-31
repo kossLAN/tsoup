@@ -94,8 +94,49 @@
 	@apply flex h-8 items-center rounded-control transition-colors hover:bg-window-text/8;
 }
 
+@utility popover-fade {
+	opacity: 0;
+	transition-property: opacity, display, overlay;
+	transition-duration: 120ms;
+	transition-timing-function: ease-out;
+	transition-behavior: allow-discrete;
+
+	&:popover-open {
+		opacity: 1;
+	}
+
+	@starting-style {
+		&:popover-open {
+			opacity: 0;
+		}
+	}
+
+	@media (prefers-reduced-motion: reduce) {
+		transition: none;
+	}
+}
+
+@utility popup {
+	@apply m-0 rounded-control surface p-1 text-window-text popover-fade shadow-overlay outline-none;
+	inset: auto;
+}
+
+@utility tooltip {
+	@apply pointer-events-none m-0 max-w-80 rounded-small border border-light bg-alternate-base px-1.5 py-0.5 text-label text-window-text popover-fade shadow-overlay;
+	inset: auto;
+}
+
+@utility menu-item {
+	@apply flex h-7 w-full shrink-0 items-center gap-2 rounded-input px-2 text-left whitespace-nowrap outline-none;
+	@apply focus:bg-window-text/8 disabled:opacity-50;
+}
+
+@utility status {
+	@apply inline-flex size-3.5 shrink-0 items-center justify-center;
+}
+
 @utility bubble {
-	@apply rounded-surface border border-light bg-alternate-base px-3 py-2;
+	@apply rounded-surface bg-alternate-base px-3 py-2;
 }
 
 @utility alert {

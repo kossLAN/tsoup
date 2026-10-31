@@ -5,6 +5,7 @@
 	import Markdown from './Markdown.svelte';
 	import Spinner from './Spinner.svelte';
 	import ToolCallLine from './ToolCallLine.svelte';
+	import Working from './Working.svelte';
 
 	let {
 		entries,
@@ -85,7 +86,7 @@
 <div class="flex-1 overflow-y-auto" bind:this={scroller} onscroll={scrolled}>
 	<div class="mx-auto flex max-w-chat flex-col gap-2.5 px-6 pt-6 pb-3">
 		{#if start > 0}
-			<div class="flex justify-center"><Spinner size={14} /></div>
+			<div class="flex justify-center"><Spinner size={14} kind="simmer" /></div>
 		{/if}
 
 		{#each entries as entry, index (start + index)}
@@ -110,7 +111,7 @@
 		{/each}
 
 		{#if busy}
-			<div class="flex items-center gap-2 text-secondary"><Spinner size={14} />Working</div>
+			<Working />
 		{/if}
 
 		{#if failure}

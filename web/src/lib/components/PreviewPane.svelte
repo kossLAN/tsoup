@@ -8,6 +8,7 @@
 		WarningCircleIcon,
 		XIcon
 	} from '$lib/icons';
+	import { tooltip } from '$lib/popup';
 	import Spinner from './Spinner.svelte';
 
 	let {
@@ -29,11 +30,8 @@
 	} = $props();
 
 	const label = {
-		stopped: 'Stopped',
 		building: 'Building image',
-		booting: 'Booting',
-		running: 'Running',
-		failed: 'Failed'
+		booting: 'Booting'
 	};
 
 	const previews = $derived(status.state === 'running' ? status.previews : []);
@@ -48,33 +46,32 @@
 </script>
 
 <section class="flex h-full flex-col border-l border-light bg-window">
-	<header class="toolbar pr-2.25 pl-3.5">
-		<span class="text-title font-medium">VM</span>
-		<span class="flex-1 text-label text-secondary">{label[status.state]}</span>
+	<header class="toolbar px-2.25">
 		{#each actions as action (action.label)}
 			<button
 				class="button gap-1.5 px-2.5 text-label enabled:hover:bg-window-text/8"
-				title={action.command}
 				disabled={status.state !== 'running'}
 				onclick={() => onaction(action.label)}
+				{@attach tooltip(action.command, 'bottom-start')}
 			>
 				<PlayIcon size={12} />
 				{action.label}
 			</button>
 		{/each}
 		{#if current}
-			<button class="icon-button" title="Reload" onclick={() => reload(current)}>
+			<button class="icon-button" onclick={() => reload(current)} {@attach tooltip('Reload')}>
 				<ArrowClockwiseIcon size={14} />
 			</button>
 			<a
 				class="icon-button"
-				title="Open in a new tab"
+				{@attach tooltip('Open in a new tab')}
 				href={previewUrl(session, current)}
 				target="_blank"
 			>
 				<ArrowSquareOutIcon size={14} />
 			</a>
 		{/if}
+		<span class="flex-1"></span>
 		{#if previews.length > 1}
 			<div class="flex gap-0.5 rounded-control bg-base p-0.5" role="tablist">
 				{#each previews as preview (preview.name)}
@@ -94,13 +91,13 @@
 		{/if}
 		<button
 			class="icon-button"
-			title="Destroy VM"
+			{@attach tooltip('Destroy VM')}
 			disabled={status.state === 'stopped'}
 			onclick={ondestroy}
 		>
 			<PowerIcon size={14} />
 		</button>
-		<button class="icon-button" title="Hide" onclick={onhide}>
+		<button class="icon-button" onclick={onhide} {@attach tooltip('Hide')}>
 			<XIcon size={14} />
 		</button>
 	</header>
@@ -127,7 +124,7 @@
 			<div class="m-auto text-secondary">The VM is not running</div>
 		{:else}
 			<div class="m-auto flex items-center gap-2.5 text-secondary">
-				<Spinner size={18} />
+				<Spinner size={18} kind="boil" />
 				{label[status.state]}
 			</div>
 		{/if}

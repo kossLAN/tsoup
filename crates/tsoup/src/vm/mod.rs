@@ -11,14 +11,14 @@ use futures_util::{SinkExt as _, StreamExt as _};
 use serde::Serialize;
 use tokio::net::{UnixListener, UnixStream};
 use tokio::process::{Child, Command};
-use tokio::sync::{Mutex, broadcast, watch};
+use tokio::sync::{Mutex, watch};
 use tokio_util::codec::Framed;
 use tsoup_proto::{CodecError, Frame, HostCodec, McpFailure, McpTool, Request, Response};
 
 use self::build::RUNNER_LINK;
 pub use self::build::{BuildError, Builder, describe};
 pub use self::preview::Preview;
-use crate::session::{Event, WORKSPACE_DIR};
+use crate::session::{Event, Events, WORKSPACE_DIR};
 
 const AGENT_SOCKET: &str = "agent.sock";
 const CONSOLE_LOG: &str = "console.log";
@@ -79,7 +79,7 @@ pub struct Vm {
     builder: Arc<Builder>,
     running: Mutex<Option<Running>>,
     status: watch::Sender<VmStatus>,
-    events: broadcast::Sender<Event>,
+    events: Events,
 }
 
 impl Vm {
@@ -87,7 +87,7 @@ impl Vm {
         dir: PathBuf,
         runtime: PathBuf,
         builder: Arc<Builder>,
-        events: broadcast::Sender<Event>,
+        events: Events,
     ) -> Self {
         let built = tokio::fs::try_exists(dir.join(RUNNER_LINK))
             .await
@@ -326,7 +326,7 @@ impl Vm {
 
     fn update(&self, change: impl FnOnce(&mut VmStatus)) {
         self.status.send_modify(change);
-        let _ = self.events.send(Event::Vm {
+        self.events.emit(Event::Vm {
             status: self.status(),
         });
     }

@@ -83,7 +83,7 @@
 			<span class="truncate font-mono text-label">{target}</span>
 		{/if}
 		{#if running}
-			<Spinner size={12} />
+			<Spinner size={12} kind="stir" />
 		{:else if result?.error}
 			<span class="inline-flex shrink-0"><WarningCircleIcon size={12} /></span>
 		{/if}

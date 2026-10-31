@@ -11,7 +11,8 @@ use axum::response::sse::{self, KeepAlive};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
 use futures_util::{Stream, StreamExt as _, stream};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
+use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -52,6 +53,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/settings", get(get_settings).put(update_settings))
         .route("/api/models", get(list_models))
+        .route("/api/events", get(list_events))
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route("/api/sessions/{id}", delete(delete_session))
         .route("/api/sessions/{id}/events", get(events))
@@ -102,6 +104,13 @@ async fn list_sessions(State(state): State<AppState>) -> Json<Vec<SessionSummary
     Json(state.sessions.list().await)
 }
 
+async fn list_events(
+    State(state): State<AppState>,
+) -> Sse<impl Stream<Item = Result<sse::Event, axum::Error>>> {
+    let (snapshot, receiver) = state.sessions.subscribe().await;
+    stream_events(snapshot, receiver, state.shutdown)
+}
+
 async fn create_session(
     State(state): State<AppState>,
 ) -> Result<(StatusCode, Json<SessionSummary>), ApiError> {
@@ -123,6 +132,17 @@ async fn events(
 ) -> Result<Sse<impl Stream<Item = Result<sse::Event, axum::Error>>>, ApiError> {
     let session = state.session(id).await?;
     let (snapshot, receiver) = session.subscribe().await;
+    Ok(stream_events(snapshot, receiver, state.shutdown))
+}
+
+fn stream_events<T>(
+    snapshot: T,
+    receiver: broadcast::Receiver<T>,
+    shutdown: CancellationToken,
+) -> Sse<impl Stream<Item = Result<sse::Event, axum::Error>>>
+where
+    T: Serialize + Clone + Send + 'static,
+{
     let live = stream::unfold(receiver, |mut receiver| async move {
         let event = receiver.recv().await.ok()?;
         Some((event, receiver))
@@ -130,8 +150,8 @@ async fn events(
     let events = stream::iter([snapshot])
         .chain(live)
         .map(|event| sse::Event::default().json_data(event))
-        .take_until(state.shutdown.cancelled_owned());
-    Ok(Sse::new(events).keep_alive(KeepAlive::default()))
+        .take_until(shutdown.cancelled_owned());
+    Sse::new(events).keep_alive(KeepAlive::default())
 }
 
 async fn list_entries(
