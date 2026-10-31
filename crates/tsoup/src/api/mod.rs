@@ -195,5 +195,6 @@ async fn run_action(
         .await
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such action"))?;
     session.vm.spawn(action.command).await?;
+    session.vm.restore_previews().await?;
     Ok(StatusCode::ACCEPTED)
 }

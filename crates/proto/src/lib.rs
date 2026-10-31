@@ -31,6 +31,7 @@ pub enum Request {
     Forward {
         from: u16,
         to: u16,
+        require_listener: bool,
     },
     McpTools,
     McpCall {

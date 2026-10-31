@@ -1,9 +1,9 @@
 use axum::body::Body;
 use axum::extract::{Request, State};
-use axum::http::StatusCode;
-use axum::http::header::HOST;
+use axum::http::header::{HOST, REFRESH};
+use axum::http::{HeaderValue, StatusCode};
 use axum::middleware::Next;
-use axum::response::{IntoResponse, Response};
+use axum::response::{IntoResponse as _, Response};
 use hyper::client::conn::http1;
 use hyper_util::rt::TokioIo;
 use tokio::net::UnixStream;
@@ -15,7 +15,7 @@ pub async fn route(State(state): State<AppState>, request: Request, next: Next) 
     match preview(&request) {
         Some((preview, id)) => proxy(state, id, &preview, request)
             .await
-            .unwrap_or_else(IntoResponse::into_response),
+            .unwrap_or_else(failed),
         None => next.run(request).await,
     }
 }
@@ -82,6 +82,21 @@ async fn proxy(
     }
 
     Ok(response.map(Body::new))
+}
+
+fn failed(error: ApiError) -> Response {
+    let mut response = error.into_response();
+
+    if matches!(
+        response.status(),
+        StatusCode::BAD_GATEWAY | StatusCode::SERVICE_UNAVAILABLE
+    ) {
+        response
+            .headers_mut()
+            .insert(REFRESH, HeaderValue::from_static("1"));
+    }
+
+    response
 }
 
 fn bad_gateway(error: hyper::Error) -> ApiError {

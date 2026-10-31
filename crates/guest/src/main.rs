@@ -71,7 +71,11 @@ impl State {
                 timeout_secs,
             } => exec(&command, Duration::from_secs(timeout_secs)).await,
             Request::Spawn { command } => spawn(&command),
-            Request::Forward { from, to } => self.forward(from, to).await,
+            Request::Forward {
+                from,
+                to,
+                require_listener,
+            } => self.forward(from, to, require_listener).await,
             Request::McpTools => self.mcp.get_or_init(Mcp::start).await.tools().await,
             Request::McpCall {
                 server,
@@ -87,8 +91,8 @@ impl State {
         }
     }
 
-    async fn forward(&mut self, from: u16, to: u16) -> Response {
-        if let Err(error) = TcpStream::connect(("localhost", to)).await {
+    async fn forward(&mut self, from: u16, to: u16, require_listener: bool) -> Response {
+        if require_listener && let Err(error) = TcpStream::connect(("localhost", to)).await {
             return Response::Failed {
                 message: format!("nothing accepts connections on port {to}: {error}"),
             };

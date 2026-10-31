@@ -239,6 +239,34 @@ impl Vm {
 
     pub async fn show_preview(&self, name: &str, port: u16) -> Result<(), VmError> {
         let mut running = self.running.lock().await;
+        self.forward(&mut running, name, port, true).await
+    }
+
+    pub async fn restore_previews(&self) -> Result<(), VmError> {
+        let mut running = self.running.lock().await;
+        let mut targets = Preview::saved_targets(&self.dir).await;
+
+        targets.retain(|name, _| {
+            running
+                .as_ref()
+                .and_then(|vm| vm.forwarded(name))
+                .is_some_and(|preview| preview.target.is_none())
+        });
+
+        for (name, port) in targets {
+            self.forward(&mut running, &name, port, false).await?;
+        }
+
+        Ok(())
+    }
+
+    async fn forward(
+        &self,
+        running: &mut Option<Running>,
+        name: &str,
+        port: u16,
+        require_listener: bool,
+    ) -> Result<(), VmError> {
         let from = running
             .as_ref()
             .ok_or(VmError::NotRunning)?
@@ -246,10 +274,13 @@ impl Vm {
             .map(|preview| preview.port)
             .ok_or_else(|| VmError::NoForward(name.to_owned()))?;
 
-        match self
-            .exchange(&mut running, Request::Forward { from, to: port })
-            .await?
-        {
+        let request = Request::Forward {
+            from,
+            to: port,
+            require_listener,
+        };
+
+        match self.exchange(running, request).await? {
             Response::Forwarded => {},
             Response::Failed { message } => return Err(VmError::GuestFailed(message)),
             _ => return Err(VmError::UnexpectedResponse),
@@ -258,6 +289,10 @@ impl Vm {
         if let Some(vm) = running.as_mut() {
             if let Some(preview) = vm.forwarded_mut(name) {
                 preview.target = Some(port);
+            }
+
+            if let Err(error) = Preview::save_targets(&self.dir, &vm.previews).await {
+                tracing::warn!(%error, "saving the VM preview targets");
             }
 
             self.set_state(vm.state());

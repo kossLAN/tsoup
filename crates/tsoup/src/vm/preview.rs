@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -5,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::VmError;
 
 const MANIFEST: &str = "share/tsoup/previews.json";
+const TARGETS: &str = "previews.json";
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Preview {
@@ -29,5 +32,21 @@ impl Preview {
 
     pub fn visible(&self) -> bool {
         !self.forwarded || self.target.is_some()
+    }
+
+    pub async fn saved_targets(dir: &Path) -> HashMap<String, u16> {
+        tokio::fs::read(dir.join(TARGETS))
+            .await
+            .ok()
+            .and_then(|targets| serde_json::from_slice(&targets).ok())
+            .unwrap_or_default()
+    }
+
+    pub async fn save_targets(dir: &Path, previews: &[Self]) -> io::Result<()> {
+        let targets: HashMap<_, _> = previews
+            .iter()
+            .filter_map(|preview| Some((&preview.name, preview.target?)))
+            .collect();
+        tokio::fs::write(dir.join(TARGETS), serde_json::to_vec(&targets)?).await
     }
 }

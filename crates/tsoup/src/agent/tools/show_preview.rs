@@ -19,7 +19,8 @@ pub struct Arguments {
 impl Tool for ShowPreview {
     const NAME: &'static str = "show_preview";
     const DESCRIPTION: &'static str = "Point a preview at a server running in the VM.
-It appears in the user's preview pane, start the server in the background with shell first.";
+It appears in the user's preview pane, start the server in the background with shell first.
+After the VM restarts, the user's action buttons show it again.";
 
     type Arguments = Arguments;
 
