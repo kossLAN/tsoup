@@ -24,7 +24,8 @@
 		create_vm: ['creating a vm', 'created a vm'],
 		run_vm: ['starting the vm', 'started the vm'],
 		destroy_vm: ['destroying the vm', 'destroyed the vm'],
-		show_website: ['showing the website', 'showed the website']
+		show_preview: ['showing a preview', 'showed a preview'],
+		set_actions: ['setting actions', 'set actions']
 	};
 
 	const running = $derived(!result && pending);

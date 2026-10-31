@@ -13,50 +13,63 @@ let
         microvm.nixosModules.microvm
         ./mcp.nix
         ./modules
-        ./surfaces.nix
+        ./previews.nix
         ./base.nix
         { nixpkgs.hostPlatform = system; }
       ]
       ++ modules;
     };
+
+  catalog = system: (nixos system [ ]).config.tsoup.modules;
+
+  enabled =
+    configuration:
+    lib.attrNames (lib.filterAttrs (_: module: module.enable) configuration.config.tsoup.modules);
 in
 {
   mkRunner =
     {
       system,
       uid,
-      kind,
+      modules,
       runtime,
       module,
-      extraModules ? [ ],
     }:
     let
       pkgs = nixpkgs.legacyPackages.${system};
-      guestAgent = self.packages.${system}.tsoup-guest;
+      available = lib.attrNames (catalog system);
+      unknown = lib.subtractLists available modules;
 
-      kinds = {
-        headless = import ./headless.nix { inherit guestAgent; };
-        graphical = import ./graphical.nix { inherit guestAgent; };
+      host.tsoup = {
+        inherit uid runtime;
+        guestAgent = self.packages.${system}.tsoup-guest;
+        modules = lib.genAttrs modules (_: {
+          enable = true;
+        });
       };
 
-      host = [
-        { tsoup = { inherit uid runtime; }; }
-        kinds.${kind}
-      ]
-      ++ extraModules;
+      trusted = nixos system [ host ];
+      untrusted = nixos system [
+        host
+        module
+      ];
 
-      trusted = nixos system host;
-      untrusted = nixos system (host ++ [ module ]);
-
-      storeDisk =
-        let
-          definitions = untrusted.options.microvm.storeDisk.definitionsWithLocations;
-          definedByMicrovm = lib.all (
+      checks = [
+        {
+          assertion = unknown == [ ];
+          message = "there are no modules named ${lib.concatStringsSep ", " unknown}, the available modules are ${lib.concatStringsSep ", " available}";
+        }
+        {
+          assertion = lib.all (
             { file, ... }: lib.hasPrefix "${microvm}/nixos-modules/microvm/" file
-          ) definitions;
-        in
-        assert lib.assertMsg definedByMicrovm "environment modules must not set microvm.storeDisk";
-        untrusted.config.microvm.storeDisk;
+          ) untrusted.options.microvm.storeDisk.definitionsWithLocations;
+          message = "environment modules must not set microvm.storeDisk";
+        }
+        {
+          assertion = enabled untrusted == enabled trusted;
+          message = "enable modules with create_vm's modules argument, not in the module";
+        }
+      ];
 
       runner = microvm.lib.buildRunner {
         inherit pkgs;
@@ -64,27 +77,31 @@ in
 
         microvmConfig = trusted.config.microvm // {
           inherit (trusted.config.networking) hostName;
-          inherit (untrusted.config.microvm) kernelParams;
-          inherit storeDisk;
+          inherit (untrusted.config.microvm) kernelParams storeDisk;
         };
       };
 
-      surfaces = pkgs.writeTextDir "share/tsoup/surfaces.json" (
-        builtins.toJSON (lib.attrValues trusted.config.tsoup.surfaces)
+      previews = pkgs.writeTextDir "share/tsoup/previews.json" (
+        builtins.toJSON (
+          lib.sort (left: right: left.priority > right.priority) (
+            lib.attrValues trusted.config.tsoup.previews
+          )
+        )
       );
     in
-    pkgs.symlinkJoin {
-      name = "tsoup-runner";
-      paths = [
-        runner
-        surfaces
-      ];
-    };
+    lib.asserts.checkAssertWarn checks [ ] (
+      pkgs.symlinkJoin {
+        name = "tsoup-runner";
+        paths = [
+          runner
+          previews
+        ];
+      }
+    );
 
   describe =
-    {
-      system,
-      extraModules ? [ ],
-    }:
-    (nixos system extraModules).config.tsoup.description;
+    system:
+    lib.concatMapAttrsStringSep "\n" (name: module: "- ${name}: ${lib.trim module.description}") (
+      catalog system
+    );
 }

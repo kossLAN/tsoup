@@ -3,7 +3,6 @@ use serde::Deserialize;
 
 use super::{Outcome, Tool, ToolError, booted};
 use crate::session::Session;
-use crate::vm::VmKind;
 
 pub struct CreateVm;
 
@@ -15,10 +14,10 @@ pub struct Arguments {
     #[serde(default)]
     module: Option<String>,
     #[schemars(
-        description = "headless suits command line programs and web apps, graphical adds a KWin Wayland desktop the user watches live. Omit it to keep the last kind."
+        description = "Optional modules to add to the VM by name, e.g. [\"graphics\"], pass [] for a plain headless VM. Omit it to keep the last selection."
     )]
     #[serde(default)]
-    kind: Option<VmKind>,
+    modules: Option<Vec<String>>,
 }
 
 impl Tool for CreateVm {
@@ -31,9 +30,9 @@ replacing the running VM. /workspace is shared with the VM.";
     async fn run(
         &self,
         session: &Session,
-        Arguments { module, kind }: Arguments,
+        Arguments { module, modules }: Arguments,
     ) -> Result<Outcome, ToolError> {
-        let failures = session.vm.create(module, kind).await?;
+        let failures = session.vm.create(module, modules).await?;
         Ok(booted(&failures))
     }
 }

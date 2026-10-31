@@ -5,25 +5,31 @@
   ...
 }:
 {
-  options.tsoup.uid = lib.mkOption {
-    type = lib.types.int;
-    internal = true;
+  options.tsoup = {
+    uid = lib.mkOption {
+      type = lib.types.int;
+      internal = true;
+    };
+
+    guestAgent = lib.mkOption {
+      type = lib.types.package;
+      internal = true;
+    };
+
+    session = lib.mkOption {
+      type = lib.types.listOf lib.types.str;
+      default = [
+        (lib.getExe' pkgs.dbus "dbus-run-session")
+        (lib.getExe config.tsoup.guestAgent)
+      ];
+      internal = true;
+    };
   };
 
   config = {
-    tsoup.surfaces = {
-      terminal = {
-        label = "Terminal";
-        protocol = "http";
-        port = 7681;
-      };
-
-      website = {
-        label = "Website";
-        protocol = "http";
-        port = 7680;
-        forwarded = true;
-      };
+    tsoup.previews.terminal = {
+      label = "Terminal";
+      port = 7681;
     };
 
     system.stateVersion = lib.mkForce lib.trivial.release;
@@ -67,7 +73,21 @@
       SUBSYSTEM=="virtio-ports", ATTR{name}=="tsoup.agent", OWNER="agent"
     '';
 
-    services.greetd.enable = lib.mkForce true;
+    services.greetd = {
+      enable = lib.mkForce true;
+
+      settings =
+        let
+          session = {
+            user = "agent";
+            command = lib.escapeShellArgs config.tsoup.session;
+          };
+        in
+        {
+          initial_session = lib.mkForce session;
+          default_session = lib.mkForce session;
+        };
+    };
 
     systemd.services.tsoup-terminal = {
       wantedBy = [ "multi-user.target" ];
@@ -81,7 +101,7 @@
           (lib.getExe pkgs.ttyd)
           "--writable"
           "--port"
-          (toString config.tsoup.surfaces.terminal.port)
+          (toString config.tsoup.previews.terminal.port)
           "--client-option"
           "disableLeaveAlert=true"
           (lib.getExe pkgs.bashInteractive)

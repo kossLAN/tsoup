@@ -22,18 +22,23 @@ export type Entry =
 	| { kind: 'assistant'; text: string | null; tool_calls: ToolCall[] }
 	| { kind: 'tool'; call_id: string; output: string; error: boolean; diff: FileDiff | null };
 
-export type Surface = {
+export type Preview = {
 	name: string;
 	label: string;
-	protocol: 'http' | 'vnc';
+	path: string;
 	target: number | null;
+};
+
+export type Action = {
+	label: string;
+	command: string;
 };
 
 export type VmStatus = (
 	| { state: 'stopped' }
 	| { state: 'building' }
 	| { state: 'booting' }
-	| { state: 'running'; surfaces: Surface[] }
+	| { state: 'running'; previews: Preview[] }
 	| { state: 'failed'; message: string }
 ) & { built: boolean };
 
@@ -43,6 +48,7 @@ export type SessionEvent =
 			title: string;
 			start: number;
 			entries: Entry[];
+			actions: Action[];
 			vm: VmStatus;
 			busy: boolean;
 	  }
@@ -51,7 +57,8 @@ export type SessionEvent =
 	| { type: 'turn_finished' }
 	| { type: 'turn_failed'; message: string }
 	| { type: 'turn_cancelled' }
-	| { type: 'vm'; status: VmStatus };
+	| { type: 'vm'; status: VmStatus }
+	| { type: 'actions'; actions: Action[] };
 
 async function request(method: string, path: string, body?: unknown): Promise<Response> {
 	const response = await fetch(path, {
@@ -103,21 +110,20 @@ export async function destroyVm(id: string): Promise<void> {
 	await request('DELETE', `/api/sessions/${id}/vm`);
 }
 
+export async function runAction(id: string, label: string): Promise<void> {
+	await request('POST', `/api/sessions/${id}/actions`, { label });
+}
+
 export function sessionEvents(id: string): EventSource {
 	return new EventSource(`/api/sessions/${id}/events`);
 }
 
-export function vncUrl(id: string, surface: string): string {
-	const scheme = location.protocol === 'https:' ? 'wss' : 'ws';
-	return `${scheme}://${location.host}/api/sessions/${id}/vnc/${surface}`;
-}
-
-export function surfaceUrl(id: string, surface: string): string {
+export function previewUrl(id: string, preview: Preview): string {
 	const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
 	const host = loopback ? 'localhost' : location.hostname;
 	const port = import.meta.env.DEV ? import.meta.env.VITE_BACKEND_PORT : location.port;
 	const origin = port ? `${host}:${port}` : host;
-	return `${location.protocol}//${surface}.${id}.${origin}/`;
+	return `${location.protocol}//${preview.name}.${id}.${origin}${preview.path}`;
 }
 
 export type Settings = {

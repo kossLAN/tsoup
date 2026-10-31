@@ -1,6 +1,6 @@
 {
   lib,
-  stdenv,
+  runCommand,
   rustPlatform,
   fetchNpmDeps,
   npmHooks,
@@ -9,6 +9,13 @@
   extraModules ? [ ],
 }:
 let
+  vmFlake = runCommand "tsoup-flake" { } ''
+    cp -r --no-preserve=mode ${flake} $out
+    ${lib.concatImapStrings (index: module: ''
+      cp -r ${module} $out/nix/vm/modules/extra-${toString index}
+    '') extraModules}
+  '';
+
   web = lib.fileset.difference ../web (
     lib.fileset.unions [
       (lib.fileset.maybeMissing ../web/node_modules)
@@ -56,14 +63,7 @@ rustPlatform.buildRustPackage {
     npmHooks.npmConfigHook
   ];
 
-  env = {
-    TSOUP_FLAKE = "path:${flake}";
-    TSOUP_EXTRA_MODULES = builtins.toJSON extraModules;
-    TSOUP_DESCRIPTION = flake.lib.describe {
-      inherit (stdenv.hostPlatform) system;
-      inherit extraModules;
-    };
-  };
+  env.TSOUP_FLAKE = "path:${vmFlake}";
 
   meta.mainProgram = "tsoup";
 }

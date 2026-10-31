@@ -1,3 +1,4 @@
+use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::llm::ToolCall;
@@ -27,6 +28,14 @@ pub struct FileDiff {
     pub patch: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
+pub struct Action {
+    #[schemars(description = "The button text, e.g. Run")]
+    pub label: String,
+    #[schemars(description = "The command, run detached with sh -c in /workspace")]
+    pub command: String,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
@@ -34,6 +43,7 @@ pub enum Event {
         title: String,
         start: usize,
         entries: Vec<Entry>,
+        actions: Vec<Action>,
         vm: VmStatus,
         busy: bool,
     },
@@ -48,5 +58,8 @@ pub enum Event {
     TurnCancelled,
     Vm {
         status: VmStatus,
+    },
+    Actions {
+        actions: Vec<Action>,
     },
 }

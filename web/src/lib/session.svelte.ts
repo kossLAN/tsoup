@@ -1,9 +1,17 @@
-import { listEntries, sessionEvents, type Entry, type SessionEvent, type VmStatus } from './api';
+import {
+	listEntries,
+	sessionEvents,
+	type Action,
+	type Entry,
+	type SessionEvent,
+	type VmStatus
+} from './api';
 import { sessions } from './sessions.svelte';
 
 export class Session {
 	title = $state('');
 	entries = $state<Entry[]>([]);
+	actions = $state<Action[]>([]);
 	start = $state(0);
 	vm = $state<VmStatus>({ state: 'stopped', built: false });
 	busy = $state(false);
@@ -46,6 +54,7 @@ export class Session {
 				this.title = event.title;
 				this.entries = [...kept, ...event.entries];
 				this.start = event.start - kept.length;
+				this.actions = event.actions;
 				this.busy = event.busy;
 				this.#setVm(event.vm);
 				this.#ready.resolve();
@@ -69,6 +78,9 @@ export class Session {
 			case 'turn_failed':
 				this.busy = false;
 				this.failure = event.message;
+				break;
+			case 'actions':
+				this.actions = event.actions;
 				break;
 			case 'vm':
 				this.#setVm(event.status);

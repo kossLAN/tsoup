@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { cancelTurn, destroyVm, startTurn, startVm } from '$lib/api';
+	import { cancelTurn, destroyVm, runAction, startTurn, startVm } from '$lib/api';
 	import Composer from '$lib/components/Composer.svelte';
 	import ModelNotice from '$lib/components/ModelNotice.svelte';
 	import PreviewPane from '$lib/components/PreviewPane.svelte';
@@ -13,7 +13,7 @@
 
 	const session = $derived(new Session(page.params.id ?? ''));
 	let hidden = $state(false);
-	let sendFailure = $state<string | null>(null);
+	let failure = $state<string | null>(null);
 
 	const active = $derived(session.vm.state !== 'stopped');
 	const startable = $derived(
@@ -40,13 +40,22 @@
 	});
 
 	async function send(text: string, id = session.id): Promise<boolean> {
-		sendFailure = null;
+		failure = null;
 		try {
 			await startTurn(id, text);
 			return true;
 		} catch (error) {
-			sendFailure = error instanceof Error ? error.message : String(error);
+			failure = error instanceof Error ? error.message : String(error);
 			return false;
+		}
+	}
+
+	async function run(label: string) {
+		failure = null;
+		try {
+			await runAction(session.id, label);
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
 		}
 	}
 </script>
@@ -73,7 +82,7 @@
 				entries={session.entries}
 				start={session.start}
 				busy={session.busy}
-				failure={sendFailure ?? session.failure}
+				failure={failure ?? session.failure}
 				onolder={() => session.loadOlder()}
 			/>
 		{/key}
@@ -90,6 +99,8 @@
 				session={session.id}
 				status={session.vm}
 				boots={session.boots}
+				actions={session.actions}
+				onaction={run}
 				onhide={() => (hidden = true)}
 				ondestroy={() => destroyVm(session.id)}
 			/>

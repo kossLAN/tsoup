@@ -13,7 +13,6 @@ tsoup-proto.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true
-bytes.workspace = true
 cap-std.workspace = true
 clap.workspace = true
 futures-util.workspace = true

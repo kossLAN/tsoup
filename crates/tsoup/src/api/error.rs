@@ -6,6 +6,7 @@ use serde::Serialize;
 use crate::llm::LlmError;
 use crate::session::SessionError;
 use crate::settings::SettingsError;
+use crate::vm::VmError;
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -58,6 +59,17 @@ impl From<SettingsError> for ApiError {
     fn from(error: SettingsError) -> Self {
         tracing::error!(%error, "saving settings failed");
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+    }
+}
+
+impl From<VmError> for ApiError {
+    fn from(error: VmError) -> Self {
+        let status = match error {
+            VmError::NotRunning => StatusCode::CONFLICT,
+            _ => StatusCode::BAD_GATEWAY,
+        };
+
+        Self::new(status, error.to_string())
     }
 }
 

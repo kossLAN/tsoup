@@ -1,5 +1,5 @@
 mod build;
-mod surface;
+mod preview;
 
 use std::io;
 use std::path::{Path, PathBuf};
@@ -16,8 +16,8 @@ use tokio_util::codec::Framed;
 use tsoup_proto::{CodecError, Frame, HostCodec, McpFailure, McpTool, Request, Response};
 
 use self::build::RUNNER_LINK;
-pub use self::build::{BuildError, Builder, VmKind};
-pub use self::surface::{Protocol, Surface};
+pub use self::build::{BuildError, Builder, describe};
+pub use self::preview::Preview;
 use crate::session::{Event, WORKSPACE_DIR};
 
 const AGENT_SOCKET: &str = "agent.sock";
@@ -30,7 +30,7 @@ pub enum VmState {
     Stopped,
     Building,
     Booting,
-    Running { surfaces: Vec<Surface> },
+    Running { previews: Vec<Preview> },
     Failed { message: String },
 }
 
@@ -47,8 +47,8 @@ pub enum VmError {
     Build(#[from] BuildError),
     #[error("starting the VM: {0}")]
     Io(#[from] io::Error),
-    #[error("reading the VM surfaces: {0}")]
-    Surfaces(#[from] serde_json::Error),
+    #[error("reading the VM previews: {0}")]
+    Previews(#[from] serde_json::Error),
     #[error("the VM exited while booting ({0}), see {CONSOLE_LOG}")]
     Exited(ExitStatus),
     #[error("the VM did not boot within {} seconds, see {CONSOLE_LOG}", BOOT_TIMEOUT.as_secs())]
@@ -59,8 +59,10 @@ pub enum VmError {
     AlreadyRunning,
     #[error("no VM has been built yet, call create_vm first")]
     NotBuilt,
-    #[error("the VM cannot show websites, rebuild it with create_vm")]
-    NoWebsite,
+    #[error(
+        "the VM has no preview named {0} that can show a port, enable the module that provides it"
+    )]
+    NoForward(String),
     #[error("talking to the guest agent: {0}")]
     Guest(#[from] CodecError),
     #[error("the guest agent hung up")]
@@ -108,21 +110,21 @@ impl Vm {
         self.status.borrow().clone()
     }
 
-    pub fn socket(&self, surface: &str, protocol: Protocol) -> Option<PathBuf> {
-        let VmState::Running { surfaces } = &self.status.borrow().state else {
+    pub fn socket(&self, preview: &str) -> Option<PathBuf> {
+        let VmState::Running { previews } = &self.status.borrow().state else {
             return None;
         };
 
-        surfaces
+        previews
             .iter()
-            .find(|candidate| candidate.name == surface && candidate.protocol == protocol)
-            .map(|surface| surface.socket.clone())
+            .find(|candidate| candidate.name == preview)
+            .map(|preview| preview.socket.clone())
     }
 
     pub async fn create(
         &self,
         module: Option<String>,
-        kind: Option<VmKind>,
+        modules: Option<Vec<String>>,
     ) -> Result<Vec<McpFailure>, VmError> {
         let mut running = self.running.lock().await;
 
@@ -130,7 +132,7 @@ impl Vm {
 
         let runner = match self
             .builder
-            .build(&self.dir, &self.runtime, module, kind)
+            .build(&self.dir, &self.runtime, module, modules)
             .await
         {
             Ok(runner) => runner,
@@ -227,14 +229,22 @@ impl Vm {
             .await
     }
 
-    pub async fn show_website(&self, port: u16) -> Result<(), VmError> {
+    pub async fn spawn(&self, command: String) -> Result<(), VmError> {
+        match self.request(Request::Spawn { command }).await? {
+            Response::Spawned => Ok(()),
+            Response::Failed { message } => Err(VmError::GuestFailed(message)),
+            _ => Err(VmError::UnexpectedResponse),
+        }
+    }
+
+    pub async fn show_preview(&self, name: &str, port: u16) -> Result<(), VmError> {
         let mut running = self.running.lock().await;
         let from = running
             .as_ref()
             .ok_or(VmError::NotRunning)?
-            .website()
-            .and_then(|website| website.port)
-            .ok_or(VmError::NoWebsite)?;
+            .forwarded(name)
+            .map(|preview| preview.port)
+            .ok_or_else(|| VmError::NoForward(name.to_owned()))?;
 
         match self
             .exchange(&mut running, Request::Forward { from, to: port })
@@ -246,8 +256,8 @@ impl Vm {
         }
 
         if let Some(vm) = running.as_mut() {
-            if let Some(website) = vm.website_mut() {
-                website.target = Some(port);
+            if let Some(preview) = vm.forwarded_mut(name) {
+                preview.target = Some(port);
             }
 
             self.set_state(vm.state());
@@ -298,7 +308,7 @@ async fn stop(running: &mut Option<Running>) {
 struct Running {
     process: Child,
     guest: Guest,
-    surfaces: Vec<Surface>,
+    previews: Vec<Preview>,
     tools: Vec<McpTool>,
 }
 
@@ -308,12 +318,12 @@ impl Running {
         runtime: &Path,
         runner: &Path,
     ) -> Result<(Self, Vec<McpFailure>), VmError> {
-        let surfaces = Surface::load(runner).await?;
+        let previews = Preview::load(runner).await?;
         tokio::fs::create_dir_all(runtime).await?;
 
-        let stale = surfaces
+        let stale = previews
             .iter()
-            .map(|surface| surface.socket.clone())
+            .map(|preview| preview.socket.clone())
             .chain([AGENT_SOCKET, WORKSPACE_DIR].map(|name| runtime.join(name)));
 
         for path in stale {
@@ -360,7 +370,7 @@ impl Running {
             Self {
                 process,
                 guest,
-                surfaces,
+                previews,
                 tools,
             },
             failures,
@@ -369,21 +379,25 @@ impl Running {
 
     fn state(&self) -> VmState {
         VmState::Running {
-            surfaces: self
-                .surfaces
+            previews: self
+                .previews
                 .iter()
-                .filter(|surface| surface.visible())
+                .filter(|preview| preview.visible())
                 .cloned()
                 .collect(),
         }
     }
 
-    fn website(&self) -> Option<&Surface> {
-        self.surfaces.iter().find(|surface| surface.forwarded)
+    fn forwarded(&self, name: &str) -> Option<&Preview> {
+        self.previews
+            .iter()
+            .find(|preview| preview.forwarded && preview.name == name)
     }
 
-    fn website_mut(&mut self) -> Option<&mut Surface> {
-        self.surfaces.iter_mut().find(|surface| surface.forwarded)
+    fn forwarded_mut(&mut self, name: &str) -> Option<&mut Preview> {
+        self.previews
+            .iter_mut()
+            .find(|preview| preview.forwarded && preview.name == name)
     }
 }
 

@@ -10,11 +10,8 @@
       packages = builtins.mapAttrs (system: _: {
         default = tsoup.lib.mkRunner {
           inherit system;
-          inherit (host) uid kind runtime;
+          inherit (host) uid modules runtime;
           module = ./module.nix;
-          extraModules = map (
-            module: (builtins.fetchTree ({ type = "path"; } // module)).outPath
-          ) host.extraModules;
         };
       }) tsoup.packages;
     };

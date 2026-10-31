@@ -2,32 +2,27 @@ mod tools;
 
 use std::sync::Arc;
 
+use tokio::sync::OnceCell;
+
 use self::tools::Toolbox;
 use crate::llm::{LlmClient, LlmError, Message};
 use crate::session::{Entry, Event, Session, SessionError};
 use crate::settings::SettingsStore;
+use crate::vm::describe;
 
 const SYSTEM_PROMPT: &str = "You are a coding agent working in a session workspace.
 The workspace is at /workspace and persists for the whole session.
 read_file, write_file and edit_file work on the workspace directly and need no VM.
 To run anything, call create_vm with a NixOS module that installs what you need, then use shell.
-The VM is a NixOS microVM, and create_vm's kind argument picks headless or graphical.
-A graphical VM runs a KWin Wayland session that the user watches live,
-so graphical programs you start with shell in the background appear on their screen.
-A headless VM has no display, use it for command line programs and web apps.
-The user always has a terminal into the VM in their preview pane.
-To show them a website served from the VM, start its server in the background with shell
-and call show_website with its port.
+The VM is a headless NixOS microVM, and the user always has a terminal into it in their preview pane.
+create_vm's modules argument adds optional modules, such as a desktop or a website preview,
+pick only the ones the task needs.
+Once the app works, call set_actions with a Run button so the user can start it again themselves.
 MCP servers in the VM appear as mcp__<server>__<tool> tools while the VM runs.
 The VM is ephemeral: everything outside /workspace is lost when it is destroyed or replaced.
 Calling create_vm again rebuilds the VM from a new module,
 so add packages that way instead of installing them imperatively.
 To start a VM that is not running without rebuilding it, call run_vm.";
-
-const DESCRIPTION: &str = match option_env!("TSOUP_DESCRIPTION") {
-    Some(description) => description,
-    None => "",
-};
 
 const INTERRUPTED: &str = "the tool call was interrupted before it finished";
 
@@ -45,6 +40,7 @@ pub struct Agent {
     llm: LlmClient,
     settings: Arc<SettingsStore>,
     tools: Toolbox,
+    modules: OnceCell<String>,
 }
 
 impl Agent {
@@ -53,6 +49,7 @@ impl Agent {
             llm: LlmClient::default(),
             settings,
             tools: Toolbox::new(),
+            modules: OnceCell::new(),
         }
     }
 
@@ -80,9 +77,10 @@ impl Agent {
         let model = settings.model.as_deref().ok_or(TurnError::NoModel)?;
 
         session.push(Entry::User { text }).await?;
+        let system = self.system_prompt().await;
 
         loop {
-            let messages = conversation(&session.entries().await);
+            let messages = conversation(&system, &session.entries().await);
             let tools = self.tools.definitions(&session.vm.mcp_tools().await);
             let reply = self
                 .llm
@@ -113,11 +111,29 @@ impl Agent {
             }
         }
     }
+
+    async fn system_prompt(&self) -> String {
+        match self
+            .modules
+            .get_or_try_init(describe)
+            .await
+            .map(|modules| modules.trim_end())
+        {
+            Ok("") => SYSTEM_PROMPT.to_owned(),
+            Ok(modules) => {
+                format!("{SYSTEM_PROMPT}\nThe modules for create_vm's modules argument:\n{modules}")
+            },
+            Err(error) => {
+                tracing::warn!(%error, "listing the VM modules");
+                SYSTEM_PROMPT.to_owned()
+            },
+        }
+    }
 }
 
-fn conversation(entries: &[Entry]) -> Vec<Message> {
+fn conversation(system: &str, entries: &[Entry]) -> Vec<Message> {
     let mut messages = vec![Message::System {
-        content: system_prompt(),
+        content: system.to_owned(),
     }];
     let mut unanswered = Vec::new();
 
@@ -151,15 +167,6 @@ fn conversation(entries: &[Entry]) -> Vec<Message> {
 
     interrupt(&mut messages, &mut unanswered);
     messages
-}
-
-fn system_prompt() -> String {
-    match DESCRIPTION.trim_end() {
-        "" => SYSTEM_PROMPT.to_owned(),
-        description => {
-            format!("{SYSTEM_PROMPT}\nThese modules are part of every VM:\n{description}")
-        },
-    }
 }
 
 fn interrupt(messages: &mut Vec<Message>, unanswered: &mut Vec<String>) {

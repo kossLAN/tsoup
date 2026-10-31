@@ -4,8 +4,9 @@ mod edit_file;
 mod mcp;
 mod read_file;
 mod run_vm;
+mod set_actions;
 mod shell;
-mod show_website;
+mod show_preview;
 mod workspace;
 mod write_file;
 
@@ -22,11 +23,12 @@ use self::destroy_vm::DestroyVm;
 use self::edit_file::EditFile;
 use self::read_file::ReadFile;
 use self::run_vm::RunVm;
+use self::set_actions::SetActions;
 use self::shell::Shell;
-use self::show_website::ShowWebsite;
+use self::show_preview::ShowPreview;
 use self::write_file::WriteFile;
 use crate::llm::{FunctionCall, FunctionDefinition, ToolCall, ToolDefinition, ToolKind};
-use crate::session::{FileDiff, Session};
+use crate::session::{FileDiff, Session, SessionError};
 use crate::vm::VmError;
 
 #[derive(Debug, thiserror::Error)]
@@ -49,6 +51,10 @@ pub enum ToolError {
     NoMatch,
     #[error("old occurs {0} times in the file, include more context so it is unique")]
     AmbiguousMatch(usize),
+    #[error("more than one action is labelled {0}")]
+    DuplicateAction(String),
+    #[error(transparent)]
+    Session(#[from] SessionError),
 }
 
 pub struct Outcome {
@@ -154,7 +160,8 @@ impl Toolbox {
             Box::new(RunVm),
             Box::new(DestroyVm),
             Box::new(Shell),
-            Box::new(ShowWebsite),
+            Box::new(ShowPreview),
+            Box::new(SetActions),
             Box::new(ReadFile),
             Box::new(WriteFile),
             Box::new(EditFile),

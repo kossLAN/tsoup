@@ -1,6 +1,5 @@
 mod error;
 mod proxy;
-mod vnc;
 mod web;
 
 use std::sync::Arc;
@@ -60,7 +59,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions/{id}/turns", post(start_turn))
         .route("/api/sessions/{id}/turn", delete(cancel_turn))
         .route("/api/sessions/{id}/vm", post(start_vm).delete(destroy_vm))
-        .route("/api/sessions/{id}/vnc/{surface}", get(vnc::vnc))
+        .route("/api/sessions/{id}/actions", post(run_action))
         .fallback(web::serve)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -77,6 +76,11 @@ struct TurnRequest {
 #[derive(Deserialize)]
 struct EntriesQuery {
     before: usize,
+}
+
+#[derive(Deserialize)]
+struct ActionRequest {
+    label: String,
 }
 
 async fn get_settings(State(state): State<AppState>) -> Json<SettingsView> {
@@ -178,4 +182,18 @@ async fn destroy_vm(
 ) -> Result<StatusCode, ApiError> {
     state.session(id).await?.vm.destroy().await;
     Ok(StatusCode::NO_CONTENT)
+}
+
+async fn run_action(
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<Uuid>,
+    Json(request): Json<ActionRequest>,
+) -> Result<StatusCode, ApiError> {
+    let session = state.session(id).await?;
+    let action = session
+        .action(&request.label)
+        .await
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such action"))?;
+    session.vm.spawn(action.command).await?;
+    Ok(StatusCode::ACCEPTED)
 }

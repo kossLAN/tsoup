@@ -10,40 +10,39 @@ use tokio::net::UnixStream;
 use uuid::Uuid;
 
 use super::{ApiError, AppState};
-use crate::vm::Protocol;
 
 pub async fn route(State(state): State<AppState>, request: Request, next: Next) -> Response {
-    match surface(&request) {
-        Some((surface, id)) => proxy(state, id, &surface, request)
+    match preview(&request) {
+        Some((preview, id)) => proxy(state, id, &preview, request)
             .await
             .unwrap_or_else(IntoResponse::into_response),
         None => next.run(request).await,
     }
 }
 
-fn surface(request: &Request) -> Option<(String, Uuid)> {
+fn preview(request: &Request) -> Option<(String, Uuid)> {
     let host = request.headers().get(HOST)?.to_str().ok()?;
     let mut labels = host.split('.');
-    let surface = labels.next()?.to_owned();
+    let preview = labels.next()?.to_owned();
     let id = labels.next()?.parse().ok()?;
-    Some((surface, id))
+    Some((preview, id))
 }
 
 async fn proxy(
     state: AppState,
     id: Uuid,
-    surface: &str,
+    preview: &str,
     mut request: Request,
 ) -> Result<Response, ApiError> {
     let session = state.session(id).await?;
     let socket = session
         .vm
-        .socket(surface, Protocol::Http)
-        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "the VM serves no such surface"))?;
+        .socket(preview)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "the VM serves no such preview"))?;
     let stream = UnixStream::connect(socket).await.map_err(|_| {
         ApiError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "the VM surface is not available",
+            "the VM preview is not available",
         )
     })?;
 
@@ -53,7 +52,7 @@ async fn proxy(
 
     tokio::spawn(async move {
         if let Err(error) = connection.with_upgrades().await {
-            tracing::debug!(%error, "a surface connection failed");
+            tracing::debug!(%error, "a preview connection failed");
         }
     });
 
@@ -68,7 +67,7 @@ async fn proxy(
             let (client, vm) = match tokio::try_join!(client, vm) {
                 Ok(upgraded) => upgraded,
                 Err(error) => {
-                    tracing::debug!(%error, "upgrading a surface connection");
+                    tracing::debug!(%error, "upgrading a preview connection");
                     return;
                 },
             };
@@ -88,6 +87,6 @@ async fn proxy(
 fn bad_gateway(error: hyper::Error) -> ApiError {
     ApiError::new(
         StatusCode::BAD_GATEWAY,
-        format!("the VM surface did not answer: {error}"),
+        format!("the VM preview did not answer: {error}"),
     )
 }

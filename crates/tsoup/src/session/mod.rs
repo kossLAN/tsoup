@@ -11,7 +11,7 @@ use tokio::sync::{Mutex, RwLock, broadcast};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-pub use self::entry::{Entry, Event, FileDiff};
+pub use self::entry::{Action, Entry, Event, FileDiff};
 use crate::vm::{Builder, Vm};
 
 const SESSION_FILE: &str = "session.json";
@@ -48,6 +48,8 @@ pub struct EntryPage {
 struct SessionData {
     title: String,
     entries: Vec<Entry>,
+    #[serde(default)]
+    actions: Vec<Action>,
 }
 
 pub struct Sessions {
@@ -228,6 +230,24 @@ impl Session {
         Ok(())
     }
 
+    pub async fn set_actions(&self, actions: Vec<Action>) -> Result<(), SessionError> {
+        let mut data = self.data.lock().await;
+        data.actions.clone_from(&actions);
+        self.persist(&data).await?;
+        self.emit(Event::Actions { actions });
+        Ok(())
+    }
+
+    pub async fn action(&self, label: &str) -> Option<Action> {
+        self.data
+            .lock()
+            .await
+            .actions
+            .iter()
+            .find(|action| action.label == label)
+            .cloned()
+    }
+
     pub fn emit(&self, event: Event) {
         let _ = self.events.send(event);
     }
@@ -240,6 +260,7 @@ impl Session {
             title: data.title.clone(),
             start,
             entries: data.entries[start..].to_vec(),
+            actions: data.actions.clone(),
             vm: self.vm.status(),
             busy: self.busy().await,
         };

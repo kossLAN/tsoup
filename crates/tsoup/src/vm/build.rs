@@ -2,7 +2,6 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 
-use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
 
@@ -10,10 +9,6 @@ const ENVIRONMENT_FLAKE: &str = include_str!("flake.nix");
 const TSOUP_FLAKE: &str = match option_env!("TSOUP_FLAKE") {
     Some(flake) => flake,
     None => concat!(env!("CARGO_MANIFEST_DIR"), "/../.."),
-};
-const TSOUP_EXTRA_MODULES: &str = match option_env!("TSOUP_EXTRA_MODULES") {
-    Some(modules) => modules,
-    None => "[]",
 };
 const EMPTY_MODULE: &str = "{ }\n";
 const ENVIRONMENT_DIR: &str = "environment";
@@ -27,37 +22,19 @@ pub enum BuildError {
     Io(#[from] io::Error),
     #[error("encoding the host settings: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("reading the extra modules: {0}")]
-    ExtraModules(serde_json::Error),
-    #[error("hashing an extra module failed:\n{0}")]
-    Hash(String),
     #[error("nix build failed:\n{0}")]
     Failed(String),
-}
-
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum VmKind {
-    Headless,
-    #[default]
-    Graphical,
+    #[error("listing the VM modules failed:\n{0}")]
+    Describe(String),
 }
 
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Host {
     uid: u32,
-    kind: VmKind,
-    runtime: PathBuf,
     #[serde(default)]
-    extra_modules: Vec<ExtraModule>,
-}
-
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct ExtraModule {
-    path: PathBuf,
-    nar_hash: String,
+    modules: Vec<String>,
+    runtime: PathBuf,
 }
 
 pub struct Builder {
@@ -74,24 +51,23 @@ impl Builder {
         dir: &Path,
         runtime: &Path,
         module: Option<String>,
-        kind: Option<VmKind>,
+        modules: Option<Vec<String>>,
     ) -> Result<PathBuf, BuildError> {
         let environment = dir.join(ENVIRONMENT_DIR);
         tokio::fs::create_dir_all(&environment).await?;
         tokio::fs::write(environment.join("flake.nix"), ENVIRONMENT_FLAKE).await?;
 
         let host = environment.join(HOST_FILE);
-        let kind = match kind {
-            Some(kind) => kind,
-            None => last_kind(&host).await,
+        let modules = match modules {
+            Some(modules) => modules,
+            None => last_modules(&host).await,
         };
         tokio::fs::write(
             &host,
             serde_json::to_vec(&Host {
                 uid: self.uid,
-                kind,
+                modules,
                 runtime: runtime.to_owned(),
-                extra_modules: extra_modules().await?,
             })?,
         )
         .await?;
@@ -127,29 +103,24 @@ impl Builder {
     }
 }
 
-async fn last_kind(host: &Path) -> VmKind {
+pub async fn describe() -> Result<String, BuildError> {
+    run(
+        nix()
+            .args(["eval", "--raw", "--impure", "--apply"])
+            .arg("describe: describe builtins.currentSystem")
+            .arg(format!("{TSOUP_FLAKE}#lib.describe")),
+        BuildError::Describe,
+    )
+    .await
+}
+
+async fn last_modules(host: &Path) -> Vec<String> {
     tokio::fs::read(host)
         .await
         .ok()
         .and_then(|host| serde_json::from_slice::<Host>(&host).ok())
-        .map(|host| host.kind)
+        .map(|host| host.modules)
         .unwrap_or_default()
-}
-
-async fn extra_modules() -> Result<Vec<ExtraModule>, BuildError> {
-    let paths: Vec<PathBuf> =
-        serde_json::from_str(TSOUP_EXTRA_MODULES).map_err(BuildError::ExtraModules)?;
-    let mut modules = Vec::with_capacity(paths.len());
-
-    for path in paths {
-        let nar_hash = run(nix().args(["hash", "path"]).arg(&path), BuildError::Hash).await?;
-        modules.push(ExtraModule {
-            path,
-            nar_hash: nar_hash.trim().to_owned(),
-        });
-    }
-
-    Ok(modules)
 }
 
 fn nix() -> Command {

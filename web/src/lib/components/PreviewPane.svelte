@@ -1,8 +1,9 @@
 <script lang="ts">
-	import { surfaceUrl, type Surface, type VmStatus } from '$lib/api';
+	import { previewUrl, type Action, type Preview, type VmStatus } from '$lib/api';
 	import {
 		ArrowClockwiseIcon,
 		ArrowSquareOutIcon,
+		PlayIcon,
 		PowerIcon,
 		WarningCircleIcon,
 		XIcon
@@ -13,12 +14,16 @@
 		session,
 		status,
 		boots,
+		actions,
+		onaction,
 		onhide,
 		ondestroy
 	}: {
 		session: string;
 		status: VmStatus;
 		boots: number;
+		actions: Action[];
+		onaction: (label: string) => void;
 		onhide: () => void;
 		ondestroy: () => void;
 	} = $props();
@@ -31,26 +36,14 @@
 		failed: 'Failed'
 	};
 
-	const surfaces = $derived(status.state === 'running' ? status.surfaces : []);
+	const previews = $derived(status.state === 'running' ? status.previews : []);
 
-	let view = $derived(
-		(
-			surfaces.find((surface) => surface.target !== null) ??
-			surfaces.find((surface) => surface.protocol === 'vnc') ??
-			surfaces[0]
-		)?.name
-	);
-	const current = $derived(surfaces.find((surface) => surface.name === view));
+	let view = $derived(previews[0]?.name);
+	const current = $derived(previews.find((preview) => preview.name === view));
 	const reloads = $state<Record<string, number>>({});
 
-	function source(surface: Surface): string {
-		return surface.protocol === 'vnc'
-			? `/vnc/${session}/${surface.name}`
-			: surfaceUrl(session, surface.name);
-	}
-
-	function reload(surface: Surface) {
-		reloads[surface.name] = (reloads[surface.name] ?? 0) + 1;
+	function reload(preview: Preview) {
+		reloads[preview.name] = (reloads[preview.name] ?? 0) + 1;
 	}
 </script>
 
@@ -58,32 +51,43 @@
 	<header class="toolbar pr-2.25 pl-3.5">
 		<span class="text-title font-medium">VM</span>
 		<span class="flex-1 text-label text-secondary">{label[status.state]}</span>
-		{#if current?.protocol === 'http'}
+		{#each actions as action (action.label)}
+			<button
+				class="button gap-1.5 px-2.5 text-label enabled:hover:bg-window-text/8"
+				title={action.command}
+				disabled={status.state !== 'running'}
+				onclick={() => onaction(action.label)}
+			>
+				<PlayIcon size={12} />
+				{action.label}
+			</button>
+		{/each}
+		{#if current}
 			<button class="icon-button" title="Reload" onclick={() => reload(current)}>
 				<ArrowClockwiseIcon size={14} />
 			</button>
 			<a
 				class="icon-button"
 				title="Open in a new tab"
-				href={surfaceUrl(session, current.name)}
+				href={previewUrl(session, current)}
 				target="_blank"
 			>
 				<ArrowSquareOutIcon size={14} />
 			</a>
 		{/if}
-		{#if surfaces.length > 1}
+		{#if previews.length > 1}
 			<div class="flex gap-0.5 rounded-control bg-base p-0.5" role="tablist">
-				{#each surfaces as surface (surface.name)}
+				{#each previews as preview (preview.name)}
 					<button
 						class={[
 							'h-5.5 rounded-input px-2 text-label',
-							view === surface.name ? 'bg-alternate-base' : 'text-secondary'
+							view === preview.name ? 'bg-alternate-base' : 'text-secondary'
 						]}
 						role="tab"
-						aria-selected={view === surface.name}
-						onclick={() => (view = surface.name)}
+						aria-selected={view === preview.name}
+						onclick={() => (view = preview.name)}
 					>
-						{surface.label}
+						{preview.label}
 					</button>
 				{/each}
 			</div>
@@ -103,12 +107,12 @@
 
 	<div class="flex min-h-0 flex-1 bg-black">
 		{#if status.state === 'running'}
-			{#each surfaces as surface (surface.name)}
-				{#key `${boots} ${surface.target} ${reloads[surface.name]}`}
+			{#each previews as preview (preview.name)}
+				{#key `${boots} ${preview.target} ${reloads[preview.name]}`}
 					<iframe
-						class={['flex-1', view !== surface.name && 'hidden']}
-						src={source(surface)}
-						title={surface.label}
+						class={['flex-1', view !== preview.name && 'hidden']}
+						src={previewUrl(session, preview)}
+						title={preview.label}
 						allow="clipboard-read; clipboard-write"
 					></iframe>
 				{/key}
