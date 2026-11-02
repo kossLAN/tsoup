@@ -7,6 +7,7 @@ use crate::llm::LlmError;
 use crate::session::SessionError;
 use crate::settings::SettingsError;
 use crate::vm::VmError;
+use crate::workspace::WorkspaceError;
 
 #[derive(Debug)]
 pub struct ApiError {
@@ -43,8 +44,12 @@ impl IntoResponse for ApiError {
 impl From<SessionError> for ApiError {
     fn from(error: SessionError) -> Self {
         let status = match error {
-            SessionError::NotFound => StatusCode::NOT_FOUND,
-            SessionError::Busy => StatusCode::CONFLICT,
+            SessionError::InvalidFolder(_) => StatusCode::BAD_REQUEST,
+            SessionError::NotFound | SessionError::NoSuchNode => StatusCode::NOT_FOUND,
+            SessionError::Busy | SessionError::NodeConnected(_) | SessionError::NotSandbox => {
+                StatusCode::CONFLICT
+            },
+            SessionError::Node(_) => StatusCode::BAD_GATEWAY,
             SessionError::Io(_) | SessionError::Json(_) => {
                 tracing::error!(%error, "a session request failed");
                 StatusCode::INTERNAL_SERVER_ERROR
@@ -70,6 +75,15 @@ impl From<VmError> for ApiError {
         };
 
         Self::new(status, error.to_string())
+    }
+}
+
+impl From<WorkspaceError> for ApiError {
+    fn from(error: WorkspaceError) -> Self {
+        match error {
+            WorkspaceError::Vm(error) => error.into(),
+            error => Self::new(StatusCode::BAD_GATEWAY, error.to_string()),
+        }
     }
 }
 

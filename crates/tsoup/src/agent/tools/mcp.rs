@@ -1,9 +1,9 @@
 use schemars::Schema;
-use tsoup_proto::{McpTool, Request, Response};
+use tsoup_proto::{McpOutput, McpTool};
 
 use super::{Outcome, ToolError, arguments};
 use crate::llm::{FunctionDefinition, ToolDefinition, ToolKind};
-use crate::session::Session;
+use crate::workspace::Workspace;
 
 const PREFIX: &str = "mcp__";
 const SEPARATOR: &str = "__";
@@ -25,25 +25,22 @@ pub fn parse(name: &str) -> Option<(&str, &str)> {
     name.strip_prefix(PREFIX)?.split_once(SEPARATOR)
 }
 
-pub async fn call(
-    session: &Session,
+pub async fn call<E>(
+    environment: &E,
     server: &str,
     tool: &str,
     raw: &str,
-) -> Result<Outcome, ToolError> {
-    let request = Request::McpCall {
-        server: server.to_owned(),
-        tool: tool.to_owned(),
-        arguments: arguments(raw)?,
-    };
+) -> Result<Outcome, ToolError>
+where
+    E: Workspace,
+{
+    let McpOutput { output, error } = environment
+        .mcp_call(server.to_owned(), tool.to_owned(), arguments(raw)?)
+        .await?;
 
-    match session.vm.request(request).await? {
-        Response::McpOutput { output, error } => Ok(Outcome {
-            output,
-            error,
-            diff: None,
-        }),
-        Response::Failed { message } => Err(ToolError::Guest(message)),
-        _ => Err(ToolError::UnexpectedResponse),
-    }
+    Ok(Outcome {
+        output,
+        error,
+        diff: None,
+    })
 }

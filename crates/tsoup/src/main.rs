@@ -1,9 +1,12 @@
 mod agent;
 mod api;
 mod llm;
+mod node;
+mod rpc;
 mod session;
 mod settings;
 mod vm;
+mod workspace;
 
 use std::env;
 use std::io::{self, Write as _};

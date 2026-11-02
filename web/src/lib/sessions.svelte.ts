@@ -4,6 +4,8 @@ import {
 	deleteSession,
 	listEvents,
 	type ListEvent,
+	type NewEnvironment,
+	type NodeSummary,
 	type SessionSummary
 } from './api';
 
@@ -11,6 +13,8 @@ const UNSEEN_KEY = 'tsoup.unseen';
 
 class SessionList {
 	items = $state<SessionSummary[]>([]);
+	nodes = $state<NodeSummary[]>([]);
+	loaded = $state(false);
 	unseen = new SvelteSet<string>(load());
 	pending = new Map<string, string>();
 	#viewing: string | null = null;
@@ -31,16 +35,15 @@ class SessionList {
 		this.#see();
 	}
 
-	async create(): Promise<SessionSummary> {
-		const session = await createSession();
-		this.items.unshift(session);
+	async create(environment: NewEnvironment): Promise<SessionSummary> {
+		const session = await createSession(environment);
+		this.#add(session);
 		return session;
 	}
 
 	async remove(id: string) {
 		await deleteSession(id);
-		this.items = this.items.filter((session) => session.id !== id);
-		if (this.unseen.delete(id)) save(this.unseen);
+		this.#forget(id);
 	}
 
 	rename(id: string, title: string) {
@@ -62,9 +65,17 @@ class SessionList {
 					if (!ids.has(id)) this.unseen.delete(id);
 				}
 				this.items = event.sessions;
+				this.nodes = event.nodes;
+				this.loaded = true;
 				save(this.unseen);
 				break;
 			}
+			case 'created':
+				this.#add(event.session);
+				break;
+			case 'removed':
+				this.#forget(event.id);
+				break;
 			case 'busy': {
 				const session = this.items.find((session) => session.id === event.id);
 				if (!session) break;
@@ -73,12 +84,26 @@ class SessionList {
 				save(this.unseen);
 				break;
 			}
-			case 'vm': {
+			case 'environment': {
 				const session = this.items.find((session) => session.id === event.id);
-				if (session) session.vm = event.status;
+				if (session) session.environment = event.environment;
 				break;
 			}
+			case 'nodes':
+				this.nodes = event.nodes;
+				break;
 		}
+	}
+
+	#add(session: SessionSummary) {
+		if (this.items.some((item) => item.id === session.id)) return;
+		const index = this.items.findIndex((item) => item.id < session.id);
+		this.items.splice(index === -1 ? this.items.length : index, 0, session);
+	}
+
+	#forget(id: string) {
+		this.items = this.items.filter((session) => session.id !== id);
+		if (this.unseen.delete(id)) save(this.unseen);
 	}
 
 	#finished(id: string) {

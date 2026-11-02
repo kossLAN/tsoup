@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{Outcome, Tool, ToolError, booted};
-use crate::session::Session;
+use crate::session::{Sandbox, Session};
 
 pub struct RunVm;
 
@@ -13,15 +13,20 @@ pub struct RunVm;
 #[derive(Deserialize, JsonSchema)]
 pub struct Arguments {}
 
-impl Tool for RunVm {
+impl Tool<Sandbox> for RunVm {
     const NAME: &'static str = "run_vm";
     const DESCRIPTION: &'static str = "Boot the VM create_vm last built, without rebuilding it.
 Use it to start the VM again after it was shut down.";
 
     type Arguments = Arguments;
 
-    async fn run(&self, session: &Session, Arguments {}: Arguments) -> Result<Outcome, ToolError> {
-        let failures = session.vm.run().await?;
+    async fn run(
+        &self,
+        _session: &Session,
+        environment: &Sandbox,
+        Arguments {}: Arguments,
+    ) -> Result<Outcome, ToolError> {
+        let failures = environment.vm.run().await?;
         Ok(booted(&failures))
     }
 }

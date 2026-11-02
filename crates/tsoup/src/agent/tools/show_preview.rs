@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{Outcome, Tool, ToolError};
-use crate::session::Session;
+use crate::session::{Sandbox, Session};
 
 pub struct ShowPreview;
 
@@ -16,7 +16,7 @@ pub struct Arguments {
     port: u16,
 }
 
-impl Tool for ShowPreview {
+impl Tool<Sandbox> for ShowPreview {
     const NAME: &'static str = "show_preview";
     const DESCRIPTION: &'static str = "Point a preview at a server running in the VM.
 It appears in the user's preview pane, start the server in the background with shell first.
@@ -26,10 +26,11 @@ After the VM restarts, the user's action buttons show it again.";
 
     async fn run(
         &self,
-        session: &Session,
+        _session: &Session,
+        environment: &Sandbox,
         Arguments { preview, port }: Arguments,
     ) -> Result<Outcome, ToolError> {
-        session.vm.show_preview(&preview, port).await?;
+        environment.vm.show_preview(&preview, port).await?;
         Ok(Outcome::text(format!(
             "the {preview} preview is visible to the user"
         )))

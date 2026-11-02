@@ -2,6 +2,7 @@
 	import { afterNavigate, goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import {
+		DesktopTowerIcon,
 		DotsThreeIcon,
 		GearSixIcon,
 		MonitorIcon,
@@ -109,7 +110,17 @@
 								active ? 'hidden' : 'group-hover:hidden'
 							]}
 						>
-							{#if session.vm.state !== 'stopped' && session.vm.state !== 'failed'}
+							{#if session.environment.kind === 'node'}
+								<span
+									class="status"
+									role="img"
+									{@attach tooltip(
+										`${session.environment.folder} on ${session.environment.name}`
+									)}
+								>
+									<DesktopTowerIcon size={12} />
+								</span>
+							{:else if session.environment.vm.state !== 'stopped' && session.environment.vm.state !== 'failed'}
 								<span class="status" role="img" {@attach tooltip('VM running')}>
 									<MonitorIcon size={12} />
 								</span>

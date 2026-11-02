@@ -2,8 +2,18 @@ export type SessionSummary = {
 	id: string;
 	title: string;
 	busy: boolean;
-	vm: VmStatus;
+	environment: EnvironmentStatus;
 };
+
+export type NodeSummary = {
+	name: string;
+	directory: string;
+};
+
+export type EnvironmentStatus =
+	{ kind: 'sandbox'; vm: VmStatus } | { kind: 'node'; name: string; folder: string };
+
+export type NewEnvironment = { kind: 'sandbox' } | { kind: 'node'; name: string; folder: string };
 
 export type ToolCall = {
 	id: string;
@@ -51,7 +61,7 @@ export type SessionEvent =
 			start: number;
 			entries: Entry[];
 			actions: Action[];
-			vm: VmStatus;
+			environment: EnvironmentStatus;
 			busy: boolean;
 	  }
 	| { type: 'entry'; entry: Entry }
@@ -59,13 +69,16 @@ export type SessionEvent =
 	| { type: 'turn_finished' }
 	| { type: 'turn_failed'; message: string }
 	| { type: 'turn_cancelled' }
-	| { type: 'vm'; status: VmStatus }
+	| { type: 'environment'; environment: EnvironmentStatus }
 	| { type: 'actions'; actions: Action[] };
 
 export type ListEvent =
-	| { type: 'snapshot'; sessions: SessionSummary[] }
+	| { type: 'snapshot'; sessions: SessionSummary[]; nodes: NodeSummary[] }
+	| { type: 'created'; session: SessionSummary }
+	| { type: 'removed'; id: string }
 	| { type: 'busy'; id: string; busy: boolean }
-	| { type: 'vm'; id: string; status: VmStatus };
+	| { type: 'environment'; id: string; environment: EnvironmentStatus }
+	| { type: 'nodes'; nodes: NodeSummary[] };
 
 async function request(method: string, path: string, body?: unknown): Promise<Response> {
 	const response = await fetch(path, {
@@ -84,8 +97,12 @@ export function listEvents(): EventSource {
 	return new EventSource('/api/events');
 }
 
-export async function createSession(): Promise<SessionSummary> {
-	return (await request('POST', '/api/sessions')).json();
+export async function listFolders(node: string): Promise<string[]> {
+	return (await request('GET', `/api/nodes/${encodeURIComponent(node)}/folders`)).json();
+}
+
+export async function createSession(environment: NewEnvironment): Promise<SessionSummary> {
+	return (await request('POST', '/api/sessions', environment)).json();
 }
 
 export async function deleteSession(id: string): Promise<void> {

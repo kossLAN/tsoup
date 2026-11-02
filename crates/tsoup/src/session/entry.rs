@@ -1,8 +1,8 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use super::EnvironmentStatus;
 use crate::llm::ToolCall;
-use crate::vm::VmStatus;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -36,6 +36,13 @@ pub struct Action {
     pub command: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Record {
+    Entry { entry: Entry },
+    Actions { actions: Vec<Action> },
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Event {
@@ -44,7 +51,7 @@ pub enum Event {
         start: usize,
         entries: Vec<Entry>,
         actions: Vec<Action>,
-        vm: VmStatus,
+        environment: EnvironmentStatus,
         busy: bool,
     },
     Entry {
@@ -56,10 +63,19 @@ pub enum Event {
         message: String,
     },
     TurnCancelled,
-    Vm {
-        status: VmStatus,
+    Environment {
+        environment: EnvironmentStatus,
     },
     Actions {
         actions: Vec<Action>,
     },
+}
+
+impl From<Record> for Event {
+    fn from(record: Record) -> Self {
+        match record {
+            Record::Entry { entry } => Self::Entry { entry },
+            Record::Actions { actions } => Self::Actions { actions },
+        }
+    }
 }

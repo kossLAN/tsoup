@@ -29,6 +29,7 @@
         default = tsoup;
         tsoup = pkgs.callPackage ./nix/tsoup.nix { flake = self; };
         tsoup-guest = pkgs.callPackage ./nix/tsoup-guest.nix { };
+        tsoup-node = pkgs.callPackage ./nix/tsoup-node.nix { };
       });
 
       lib = import ./nix/vm { inherit self nixpkgs microvm; };

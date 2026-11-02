@@ -1,4 +1,5 @@
 mod error;
+mod node;
 mod proxy;
 mod web;
 
@@ -18,8 +19,9 @@ use uuid::Uuid;
 
 pub use self::error::ApiError;
 use crate::agent::Agent;
-use crate::session::{EntryPage, Session, SessionSummary, Sessions};
+use crate::session::{EntryPage, NewEnvironment, Session, SessionSummary, Sessions};
 use crate::settings::{SettingsStore, SettingsUpdate, SettingsView};
+use crate::workspace::Workspace as _;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -62,6 +64,8 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions/{id}/turn", delete(cancel_turn))
         .route("/api/sessions/{id}/vm", post(start_vm).delete(destroy_vm))
         .route("/api/sessions/{id}/actions", post(run_action))
+        .route("/api/nodes/{name}", get(node::connect))
+        .route("/api/nodes/{name}/folders", get(node::folders))
         .fallback(web::serve)
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
@@ -113,8 +117,9 @@ async fn list_events(
 
 async fn create_session(
     State(state): State<AppState>,
+    Json(environment): Json<NewEnvironment>,
 ) -> Result<(StatusCode, Json<SessionSummary>), ApiError> {
-    let session = state.sessions.create().await?;
+    let session = state.sessions.create(environment).await?;
     Ok((StatusCode::CREATED, Json(session.summary().await)))
 }
 
@@ -185,10 +190,10 @@ async fn start_vm(
     State(state): State<AppState>,
     UrlPath(id): UrlPath<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    let session = state.session(id).await?;
+    let sandbox = Arc::clone(state.session(id).await?.sandbox()?);
 
     tokio::spawn(async move {
-        if let Err(error) = session.vm.run().await {
+        if let Err(error) = sandbox.vm.run().await {
             tracing::warn!(%id, %error, "starting a VM");
         }
     });
@@ -200,7 +205,7 @@ async fn destroy_vm(
     State(state): State<AppState>,
     UrlPath(id): UrlPath<Uuid>,
 ) -> Result<StatusCode, ApiError> {
-    state.session(id).await?.vm.destroy().await;
+    state.session(id).await?.sandbox()?.vm.destroy().await;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -210,11 +215,12 @@ async fn run_action(
     Json(request): Json<ActionRequest>,
 ) -> Result<StatusCode, ApiError> {
     let session = state.session(id).await?;
+    let sandbox = session.sandbox()?;
     let action = session
         .action(&request.label)
         .await
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such action"))?;
-    session.vm.spawn(action.command).await?;
-    session.vm.restore_previews().await?;
+    sandbox.spawn(action.command).await?;
+    sandbox.vm.restore_previews().await?;
     Ok(StatusCode::ACCEPTED)
 }

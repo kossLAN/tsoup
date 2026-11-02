@@ -1,24 +1,21 @@
-mod mcp;
-
 use std::collections::HashMap;
 use std::io;
 use std::net::Ipv4Addr;
 use std::path::Path;
-use std::process::{ExitCode, Stdio};
+use std::process::ExitCode;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU16, Ordering};
-use std::time::Duration;
 
-use futures_util::{SinkExt as _, StreamExt as _};
+use anyhow::Context as _;
 use tokio::fs::OpenOptions;
 use tokio::net::{TcpListener, TcpStream};
-use tokio::process::Command;
-use tokio::sync::OnceCell;
-use tokio_util::codec::Framed;
+use tokio::sync::{Mutex, OnceCell};
 use tracing_subscriber::EnvFilter;
-use tsoup_proto::{CodecError, Frame, GuestCodec, MAX_OUTPUT, PORT, Request, Response, WORKSPACE};
+use tsoup_proto::guest::{Guest, PORT, Request, Response, WORKSPACE};
+use tsoup_workspace::mcp::Mcp;
+use tsoup_workspace::rpc::{self, Handler};
 
-use self::mcp::Mcp;
+const MCP_CONFIG: &str = "/etc/tsoup/mcp.json";
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -32,88 +29,78 @@ async fn main() -> ExitCode {
     match run().await {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
-            tracing::error!(%error, "the guest agent stopped");
+            tracing::error!("the guest agent stopped: {error:#}");
             ExitCode::FAILURE
         },
     }
 }
 
-async fn run() -> Result<(), CodecError> {
+async fn run() -> anyhow::Result<()> {
     let port = OpenOptions::new()
         .read(true)
         .write(true)
         .open(Path::new("/dev/virtio-ports").join(PORT))
         .await?;
-    let mut host = Framed::new(port, GuestCodec::default());
-    let mut state = State::default();
+    let host = tokio::io::join(port.try_clone().await?, port);
 
-    while let Some(frame) = host.next().await {
-        let Frame { id, body } = frame?;
-        let body = state.handle(body).await;
-        host.send(Frame { id, body }).await?;
-    }
-
-    Ok(())
+    rpc::serve(host, Arc::new(Agent::default())).await
 }
 
 #[derive(Default)]
-struct State {
-    forwards: HashMap<u16, Arc<AtomicU16>>,
+struct Agent {
+    forwards: Mutex<HashMap<u16, Arc<AtomicU16>>>,
     mcp: OnceCell<Mcp>,
 }
 
-impl State {
-    async fn handle(&mut self, request: Request) -> Response {
-        match request {
-            Request::Ping => Response::Pong,
-            Request::Exec {
-                command,
-                timeout_secs,
-            } => exec(&command, Duration::from_secs(timeout_secs)).await,
-            Request::Spawn { command } => spawn(&command),
+impl Handler for Agent {
+    type Protocol = Guest;
+
+    async fn handle(&self, request: Request) -> anyhow::Result<Response> {
+        Ok(match request {
+            Request::Workspace(request) => {
+                Response::Workspace(tsoup_workspace::run(Path::new(WORKSPACE), request).await?)
+            },
+            Request::Mcp(request) => Response::Mcp(self.mcp().await.handle(request).await?),
             Request::Forward {
                 from,
                 to,
                 require_listener,
-            } => self.forward(from, to, require_listener).await,
-            Request::McpTools => self.mcp.get_or_init(Mcp::start).await.tools().await,
-            Request::McpCall {
-                server,
-                tool,
-                arguments,
             } => {
-                self.mcp
-                    .get_or_init(Mcp::start)
-                    .await
-                    .call(&server, tool, arguments)
-                    .await
+                self.forward(from, to, require_listener).await?;
+                Response::Done
             },
-        }
+        })
+    }
+}
+
+impl Agent {
+    async fn mcp(&self) -> &Mcp {
+        self.mcp
+            .get_or_init(|| Mcp::start(Path::new(MCP_CONFIG), Path::new(WORKSPACE)))
+            .await
     }
 
-    async fn forward(&mut self, from: u16, to: u16, require_listener: bool) -> Response {
-        if require_listener && let Err(error) = TcpStream::connect(("localhost", to)).await {
-            return Response::Failed {
-                message: format!("nothing accepts connections on port {to}: {error}"),
-            };
+    async fn forward(&self, from: u16, to: u16, require_listener: bool) -> anyhow::Result<()> {
+        if require_listener {
+            TcpStream::connect(("localhost", to))
+                .await
+                .with_context(|| format!("nothing accepts connections on port {to}"))?;
         }
 
-        if let Some(target) = self.forwards.get(&from) {
+        let mut forwards = self.forwards.lock().await;
+
+        if let Some(target) = forwards.get(&from) {
             target.store(to, Ordering::Relaxed);
-            return Response::Forwarded;
+            return Ok(());
         }
 
-        match TcpListener::bind((Ipv4Addr::UNSPECIFIED, from)).await {
-            Ok(listener) => {
-                let target = Arc::new(AtomicU16::new(to));
-                tokio::spawn(relay(listener, Arc::clone(&target)));
-                self.forwards.insert(from, target);
-                Response::Forwarded
-            },
-            Err(error) => Response::Failed {
-                message: format!("listening on port {from}: {error}"),
-            },
-        }
+        let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, from))
+            .await
+            .with_context(|| format!("listening on port {from}"))?;
+        let target = Arc::new(AtomicU16::new(to));
+        tokio::spawn(relay(listener, Arc::clone(&target)));
+        forwards.insert(from, target);
+        Ok(())
     }
 }
 
@@ -138,55 +125,4 @@ async fn relay(listener: TcpListener, target: Arc<AtomicU16>) {
             }
         });
     }
-}
-
-fn shell(command: &str) -> Command {
-    let mut shell = Command::new("sh");
-    shell
-        .arg("-c")
-        .arg(command)
-        .current_dir(WORKSPACE)
-        .stdin(Stdio::null());
-    shell
-}
-
-async fn exec(command: &str, timeout: Duration) -> Response {
-    let output = shell(command).kill_on_drop(true).output();
-
-    match tokio::time::timeout(timeout, output).await {
-        Ok(Ok(output)) => Response::Exited {
-            code: output.status.code(),
-            stdout: tail(&output.stdout),
-            stderr: tail(&output.stderr),
-        },
-        Ok(Err(error)) => Response::Failed {
-            message: error.to_string(),
-        },
-        Err(_) => Response::TimedOut,
-    }
-}
-
-fn spawn(command: &str) -> Response {
-    let child = shell(command)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .process_group(0)
-        .spawn();
-
-    match child {
-        Ok(_) => Response::Spawned,
-        Err(error) => Response::Failed {
-            message: error.to_string(),
-        },
-    }
-}
-
-fn tail(output: &[u8]) -> String {
-    let output = String::from_utf8_lossy(output);
-    let start = output.len().saturating_sub(MAX_OUTPUT);
-    let start = (start..output.len())
-        .find(|&index| output.is_char_boundary(index))
-        .unwrap_or(output.len());
-
-    output[start..].to_owned()
 }

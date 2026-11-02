@@ -1,15 +1,18 @@
 <script lang="ts">
 	import { ArrowElbowDownLeftIcon, StopIcon } from '$lib/icons';
 	import { tooltip } from '$lib/popup';
+	import type { Snippet } from 'svelte';
 
 	let {
 		busy = false,
 		onsend,
-		onstop
+		onstop,
+		accessory
 	}: {
 		busy?: boolean;
 		onsend: (text: string) => Promise<boolean>;
 		onstop?: () => void;
+		accessory?: Snippet;
 	} = $props();
 
 	let text = $state('');
@@ -52,6 +55,7 @@
 			onkeydown={keydown}
 			rows="1"
 			placeholder="Ask the agent"></textarea>
+		{@render accessory?.()}
 		{#if busy && onstop}
 			<button class="icon-button" onclick={onstop} {@attach tooltip('Stop')}>
 				<StopIcon size={16} />

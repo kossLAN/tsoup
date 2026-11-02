@@ -1,15 +1,15 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::workspace::{blocking, changed, open, relative};
 use super::{Outcome, Tool, ToolError};
 use crate::session::Session;
+use crate::workspace::Workspace;
 
 pub struct EditFile;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct Arguments {
-    #[schemars(description = "A path inside /workspace")]
+    #[schemars(description = "A path, relative paths resolve against the working directory")]
     path: String,
     #[schemars(description = "Text that occurs exactly once in the file")]
     old: String,
@@ -17,36 +17,31 @@ pub struct Arguments {
     new: String,
 }
 
-impl Tool for EditFile {
+impl<E: Workspace> Tool<E> for EditFile {
     const NAME: &'static str = "edit_file";
-    const DESCRIPTION: &'static str =
-        "Replace one exact occurrence of a piece of text in a workspace file.";
+    const DESCRIPTION: &'static str = "Replace one exact occurrence of a piece of text in a file.";
 
     type Arguments = Arguments;
 
     async fn run(
         &self,
-        session: &Session,
+        _session: &Session,
+        environment: &E,
         Arguments { path, old, new }: Arguments,
     ) -> Result<Outcome, ToolError> {
-        let workspace = session.workspace();
-        let target = path.clone();
-        let (before, after) = blocking(move || {
-            let dir = open(&workspace)?;
-            let file = relative(&target);
-            let before = dir.read_to_string(file)?;
+        let Some(before) = environment.read(&path).await? else {
+            return Err(ToolError::NoFile(path));
+        };
 
-            match before.matches(&old).count() {
-                0 => return Err(ToolError::NoMatch),
-                1 => {},
-                count => return Err(ToolError::AmbiguousMatch(count)),
-            }
+        match before.matches(&old).count() {
+            0 => return Err(ToolError::NoMatch),
+            1 => {},
+            count => return Err(ToolError::AmbiguousMatch(count)),
+        }
 
-            let after = before.replacen(&old, &new, 1);
-            dir.write(file, &after)?;
-            Ok((before, after))
-        })
-        .await?;
-        Ok(changed(path, &before, &after))
+        let after = before.replacen(&old, &new, 1);
+        let outcome = Outcome::changed(&path, &before, &after);
+        environment.write(&path, after).await?;
+        Ok(outcome)
     }
 }

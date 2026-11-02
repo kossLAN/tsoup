@@ -1,11 +1,12 @@
 <script lang="ts">
+	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
 	import { cancelTurn, destroyVm, runAction, startTurn, startVm } from '$lib/api';
 	import Composer from '$lib/components/Composer.svelte';
 	import ModelNotice from '$lib/components/ModelNotice.svelte';
 	import PreviewPane from '$lib/components/PreviewPane.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
-	import { MonitorIcon, PlayIcon } from '$lib/icons';
+	import { DesktopTowerIcon, FolderIcon, MonitorIcon, PlayIcon } from '$lib/icons';
 	import { tooltip } from '$lib/popup';
 	import { Session } from '$lib/session.svelte';
 	import { sessions } from '$lib/sessions.svelte';
@@ -16,10 +17,13 @@
 	let hidden = $state(false);
 	let failure = $state<string | null>(null);
 
-	const active = $derived(session.vm.state !== 'stopped');
+	const vm = $derived(session.vm);
+	const active = $derived(vm !== null && vm.state !== 'stopped');
 	const startable = $derived(
-		session.vm.built && (session.vm.state === 'stopped' || session.vm.state === 'failed')
+		vm !== null && vm.built && (vm.state === 'stopped' || vm.state === 'failed')
 	);
+	const node = $derived(session.environment?.kind === 'node' ? session.environment : null);
+	const directory = $derived(sessions.nodes.find(({ name }) => name === node?.name)?.directory);
 
 	$effect(() => {
 		const current = session;
@@ -32,6 +36,12 @@
 	});
 
 	$effect(() => {
+		if (sessions.loaded && !sessions.items.some((item) => item.id === session.id)) {
+			goto('/');
+		}
+	});
+
+	$effect(() => {
 		const current = session;
 		const text = sessions.pending.get(current.id);
 		if (text === undefined) return;
@@ -40,7 +50,7 @@
 	});
 
 	$effect(() => {
-		if (session.vm.state === 'building' || session.vm.state === 'booting') {
+		if (vm?.state === 'building' || vm?.state === 'booting') {
 			hidden = false;
 		}
 	});
@@ -72,6 +82,17 @@
 			<span class="flex-1 truncate text-title font-medium"
 				>{session.title || 'New session'}</span
 			>
+			{#if node}
+				<span
+					class="flex items-center gap-1.5 px-1.5 text-label text-secondary"
+					{@attach tooltip(directory ? `${directory}/${node.folder}` : node.folder)}
+				>
+					<DesktopTowerIcon size={14} />
+					{node.name}
+					<FolderIcon size={14} />
+					{node.folder}
+				</span>
+			{/if}
 			{#if startable}
 				<button
 					class="icon-button"
@@ -104,14 +125,14 @@
 		<Composer busy={session.busy} onsend={send} onstop={() => cancelTurn(session.id)} />
 	</div>
 
-	{#if active && !hidden}
+	{#if vm && active && !hidden}
 		<div
 			class="w-1/2 max-w-240 shrink-0"
 			transition:fly={{ x: 80, duration: 200, easing: cubicOut }}
 		>
 			<PreviewPane
 				session={session.id}
-				status={session.vm}
+				status={vm}
 				boots={session.boots}
 				actions={session.actions}
 				onaction={run}

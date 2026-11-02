@@ -7,16 +7,14 @@ mod run_vm;
 mod set_actions;
 mod shell;
 mod show_preview;
-mod workspace;
 mod write_file;
-
-use std::io;
 
 use futures_util::future::BoxFuture;
 use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
 use serde::de::DeserializeOwned;
-use tsoup_proto::{McpFailure, McpTool};
+use similar::TextDiff;
+use tsoup_proto::McpFailure;
 
 use self::create_vm::CreateVm;
 use self::destroy_vm::DestroyVm;
@@ -28,8 +26,10 @@ use self::shell::Shell;
 use self::show_preview::ShowPreview;
 use self::write_file::WriteFile;
 use crate::llm::{FunctionCall, FunctionDefinition, ToolCall, ToolDefinition, ToolKind};
-use crate::session::{FileDiff, Session, SessionError};
+use crate::node::Folder;
+use crate::session::{Environment, FileDiff, Sandbox, Session, SessionError};
 use crate::vm::VmError;
+use crate::workspace::{Workspace, WorkspaceError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ToolError {
@@ -40,13 +40,11 @@ pub enum ToolError {
     #[error(transparent)]
     Vm(#[from] VmError),
     #[error(transparent)]
-    Io(#[from] io::Error),
+    Workspace(#[from] WorkspaceError),
     #[error("the command timed out after {0} seconds")]
     TimedOut(u64),
-    #[error("the guest agent failed: {0}")]
-    Guest(String),
-    #[error("the guest agent sent an unexpected response")]
-    UnexpectedResponse,
+    #[error("{0} does not exist")]
+    NoFile(String),
     #[error("old does not occur in the file")]
     NoMatch,
     #[error("old occurs {0} times in the file, include more context so it is unique")]
@@ -72,6 +70,23 @@ impl Outcome {
         }
     }
 
+    fn changed(path: &str, before: &str, after: &str) -> Self {
+        let unified = TextDiff::from_lines(before, after)
+            .unified_diff()
+            .context_radius(3)
+            .header(path, path)
+            .to_string();
+
+        Self {
+            output: format!("wrote {path}"),
+            error: false,
+            diff: Some(FileDiff {
+                path: path.to_owned(),
+                patch: unified,
+            }),
+        }
+    }
+
     fn failure(error: ToolError) -> Self {
         Self {
             output: error.to_string(),
@@ -91,7 +106,7 @@ fn booted(failures: &[McpFailure]) -> Outcome {
     Outcome::text(output)
 }
 
-pub trait Tool: Send + Sync + 'static {
+pub trait Tool<E>: Send + Sync + 'static {
     const NAME: &'static str;
     const DESCRIPTION: &'static str;
 
@@ -100,11 +115,12 @@ pub trait Tool: Send + Sync + 'static {
     fn run(
         &self,
         session: &Session,
+        environment: &E,
         arguments: Self::Arguments,
     ) -> impl Future<Output = Result<Outcome, ToolError>> + Send;
 }
 
-trait ErasedTool: Send + Sync {
+trait ErasedTool<E>: Send + Sync {
     fn name(&self) -> &'static str;
 
     fn definition(&self) -> ToolDefinition;
@@ -112,13 +128,15 @@ trait ErasedTool: Send + Sync {
     fn call<'a>(
         &'a self,
         session: &'a Session,
+        environment: &'a E,
         raw: &'a str,
     ) -> BoxFuture<'a, Result<Outcome, ToolError>>;
 }
 
-impl<T> ErasedTool for T
+impl<E, T> ErasedTool<E> for T
 where
-    T: Tool,
+    E: Sync,
+    T: Tool<E>,
 {
     fn name(&self) -> &'static str {
         T::NAME
@@ -142,51 +160,95 @@ where
     fn call<'a>(
         &'a self,
         session: &'a Session,
+        environment: &'a E,
         raw: &'a str,
     ) -> BoxFuture<'a, Result<Outcome, ToolError>> {
-        Box::pin(async move { self.run(session, arguments(raw)?).await })
+        Box::pin(async move { self.run(session, environment, arguments(raw)?).await })
     }
 }
 
-pub struct Toolbox {
-    tools: Vec<Box<dyn ErasedTool>>,
+struct Toolbox<E> {
+    tools: Vec<Box<dyn ErasedTool<E>>>,
     definitions: Vec<ToolDefinition>,
 }
 
-impl Toolbox {
-    pub fn new() -> Self {
-        let tools: Vec<Box<dyn ErasedTool>> = vec![
-            Box::new(CreateVm),
-            Box::new(RunVm),
-            Box::new(DestroyVm),
-            Box::new(Shell),
-            Box::new(ShowPreview),
-            Box::new(SetActions),
-            Box::new(ReadFile),
-            Box::new(WriteFile),
-            Box::new(EditFile),
-        ];
+impl<E: Workspace> Toolbox<E> {
+    fn new(tools: Vec<Box<dyn ErasedTool<E>>>) -> Self {
         let definitions = tools.iter().map(|tool| tool.definition()).collect();
         Self { tools, definitions }
     }
 
-    pub fn definitions(&self, mcp: &[McpTool]) -> Vec<ToolDefinition> {
+    async fn definitions(&self, environment: &E) -> Vec<ToolDefinition> {
         self.definitions
             .iter()
             .cloned()
-            .chain(mcp.iter().filter_map(mcp::definition))
+            .chain(
+                environment
+                    .mcp_tools()
+                    .await
+                    .iter()
+                    .filter_map(mcp::definition),
+            )
             .collect()
     }
 
-    pub async fn execute(&self, session: &Session, call: &ToolCall) -> Outcome {
-        let FunctionCall { name, arguments } = &call.function;
-
-        let result = if let Some(tool) = self.tools.iter().find(|tool| tool.name() == name) {
-            tool.call(session, arguments).await
+    async fn execute(
+        &self,
+        session: &Session,
+        environment: &E,
+        FunctionCall { name, arguments }: &FunctionCall,
+    ) -> Result<Outcome, ToolError> {
+        if let Some(tool) = self.tools.iter().find(|tool| tool.name() == name) {
+            tool.call(session, environment, arguments).await
         } else if let Some((server, tool)) = mcp::parse(name) {
-            mcp::call(session, server, tool, arguments).await
+            mcp::call(environment, server, tool, arguments).await
         } else {
             Err(ToolError::Unknown(name.clone()))
+        }
+    }
+}
+
+pub struct Tools {
+    sandbox: Toolbox<Sandbox>,
+    node: Toolbox<Folder>,
+}
+
+impl Tools {
+    pub fn new() -> Self {
+        Self {
+            sandbox: Toolbox::new(vec![
+                Box::new(CreateVm),
+                Box::new(RunVm),
+                Box::new(DestroyVm),
+                Box::new(Shell),
+                Box::new(ShowPreview),
+                Box::new(SetActions),
+                Box::new(ReadFile),
+                Box::new(WriteFile),
+                Box::new(EditFile),
+            ]),
+            node: Toolbox::new(vec![
+                Box::new(Shell),
+                Box::new(ReadFile),
+                Box::new(WriteFile),
+                Box::new(EditFile),
+            ]),
+        }
+    }
+
+    pub async fn definitions(&self, session: &Session) -> Vec<ToolDefinition> {
+        match &session.environment {
+            Environment::Sandbox(sandbox) => self.sandbox.definitions(sandbox).await,
+            Environment::Node(folder) => self.node.definitions(folder).await,
+        }
+    }
+
+    pub async fn execute(&self, session: &Session, call: &ToolCall) -> Outcome {
+        let result = match &session.environment {
+            Environment::Sandbox(sandbox) => {
+                self.sandbox.execute(session, sandbox, &call.function).await
+            },
+            Environment::Node(folder) => self.node.execute(session, folder, &call.function).await,
         };
 
         result.unwrap_or_else(Outcome::failure)

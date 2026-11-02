@@ -1,26 +1,23 @@
 use std::collections::HashMap;
 use std::io;
+use std::path::Path;
 use std::sync::Arc;
 use std::time::Duration;
 
 use rmcp::model::{CallToolRequestParams, ContentBlock, EmbeddedResource, ResourceContents};
-use rmcp::service::{ClientInitializeError, RunningService};
+use rmcp::service::{ClientInitializeError, RunningService, ServiceError};
 use rmcp::transport::TokioChildProcess;
 use rmcp::{RoleClient, ServiceExt as _};
 use serde::Deserialize;
 use serde_json::{Map, Value};
 use tokio::process::Command;
-use tsoup_proto::{MAX_OUTPUT, McpFailure, McpTool, Response, WORKSPACE};
+use tsoup_proto::mcp::{Request, Response};
+use tsoup_proto::{MAX_OUTPUT, McpFailure, McpListing, McpOutput, McpTool};
 
-const CONFIG: &str = "/etc/tsoup/mcp.json";
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, thiserror::Error)]
-enum McpError {
-    #[error("reading {CONFIG}: {0}")]
-    Config(io::Error),
-    #[error("parsing {CONFIG}: {0}")]
-    Parse(#[from] serde_json::Error),
+enum StartError {
     #[error("the command is empty")]
     EmptyCommand,
     #[error("starting the server: {0}")]
@@ -29,47 +26,58 @@ enum McpError {
     Initialize(Box<ClientInitializeError>),
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum CallError {
+    #[error("there is no MCP server named {0}")]
+    NoServer(String),
+    #[error("the MCP server failed: {0}")]
+    Failed(#[from] ServiceError),
+    #[error("the MCP call timed out after {} seconds", CALL_TIMEOUT.as_secs())]
+    TimedOut,
+}
+
 #[derive(Deserialize)]
 struct Server {
     command: Vec<String>,
 }
 
+#[derive(Default)]
 pub struct Mcp {
     servers: HashMap<String, RunningService<RoleClient, ()>>,
     failures: Vec<McpFailure>,
 }
 
 impl Mcp {
-    pub async fn start() -> Self {
-        let mut mcp = Self {
-            servers: HashMap::new(),
-            failures: Vec::new(),
-        };
+    pub async fn start(config: &Path, dir: &Path) -> Self {
+        let mut mcp = Self::default();
 
-        let config = match config().await {
+        let config = match load(config).await {
             Ok(config) => config,
             Err(error) => {
-                tracing::error!(%error, "loading the MCP servers");
+                tracing::error!(config = %config.display(), %error, "loading the MCP servers");
                 return mcp;
             },
         };
 
         for (name, server) in config {
-            match connect(&server.command).await {
+            match connect(&server.command, dir).await {
                 Ok(service) => {
                     mcp.servers.insert(name, service);
                 },
-                Err(error) => mcp.failures.push(McpFailure {
-                    server: name,
-                    message: error.to_string(),
-                }),
+                Err(error) => {
+                    tracing::warn!(server = name, %error, "starting an MCP server");
+                    mcp.failures.push(McpFailure {
+                        server: name,
+                        message: error.to_string(),
+                    });
+                },
             }
         }
 
         mcp
     }
 
-    pub async fn tools(&self) -> Response {
+    pub async fn tools(&self) -> McpListing {
         let mut tools = Vec::new();
         let mut failures = self.failures.clone();
 
@@ -88,55 +96,58 @@ impl Mcp {
             }
         }
 
-        Response::McpTools { tools, failures }
+        McpListing { tools, failures }
     }
 
-    pub async fn call(
+    pub async fn handle(&self, request: Request) -> Result<Response, CallError> {
+        Ok(match request {
+            Request::Tools => Response::Tools(self.tools().await),
+            Request::Call {
+                server,
+                tool,
+                arguments,
+            } => Response::Output(self.call(&server, tool, arguments).await?),
+        })
+    }
+
+    async fn call(
         &self,
         server: &str,
         tool: String,
         arguments: Map<String, Value>,
-    ) -> Response {
-        let Some(service) = self.servers.get(server) else {
-            return Response::Failed {
-                message: format!("there is no MCP server named {server}"),
-            };
-        };
-
+    ) -> Result<McpOutput, CallError> {
+        let service = self
+            .servers
+            .get(server)
+            .ok_or_else(|| CallError::NoServer(server.to_owned()))?;
         let call = service.call_tool(CallToolRequestParams::new(tool).with_arguments(arguments));
+        let result = tokio::time::timeout(CALL_TIMEOUT, call)
+            .await
+            .map_err(|_| CallError::TimedOut)??;
 
-        match tokio::time::timeout(CALL_TIMEOUT, call).await {
-            Ok(Ok(result)) => Response::McpOutput {
-                output: flatten(&result.content),
-                error: result.is_error.unwrap_or(false),
-            },
-            Ok(Err(error)) => Response::Failed {
-                message: format!("the MCP server failed: {error}"),
-            },
-            Err(_) => Response::Failed {
-                message: format!(
-                    "the MCP call timed out after {} seconds",
-                    CALL_TIMEOUT.as_secs()
-                ),
-            },
-        }
+        Ok(McpOutput {
+            output: flatten(&result.content),
+            error: result.is_error.unwrap_or(false),
+        })
     }
 }
 
-async fn config() -> Result<HashMap<String, Server>, McpError> {
-    let config = tokio::fs::read(CONFIG).await.map_err(McpError::Config)?;
-    Ok(serde_json::from_slice(&config)?)
+async fn load(config: &Path) -> io::Result<HashMap<String, Server>> {
+    Ok(serde_json::from_slice(&tokio::fs::read(config).await?)?)
 }
 
-async fn connect(command: &[String]) -> Result<RunningService<RoleClient, ()>, McpError> {
-    let (program, args) = command.split_first().ok_or(McpError::EmptyCommand)?;
+async fn connect(
+    command: &[String],
+    dir: &Path,
+) -> Result<RunningService<RoleClient, ()>, StartError> {
+    let (program, args) = command.split_first().ok_or(StartError::EmptyCommand)?;
     let mut process = Command::new(program);
-    process.args(args).current_dir(WORKSPACE);
+    process.args(args).current_dir(dir);
 
     let transport = TokioChildProcess::new(process)?;
     ().serve(transport)
         .await
-        .map_err(|error| McpError::Initialize(Box::new(error)))
+        .map_err(|error| StartError::Initialize(Box::new(error)))
 }
 
 fn flatten(content: &[ContentBlock]) -> String {

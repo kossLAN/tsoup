@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{Outcome, Tool, ToolError, booted};
-use crate::session::Session;
+use crate::session::{Sandbox, Session};
 
 pub struct CreateVm;
 
@@ -20,7 +20,7 @@ pub struct Arguments {
     modules: Option<Vec<String>>,
 }
 
-impl Tool for CreateVm {
+impl Tool<Sandbox> for CreateVm {
     const NAME: &'static str = "create_vm";
     const DESCRIPTION: &'static str = "Build a microVM from a NixOS module and boot it,
 replacing the running VM. /workspace is shared with the VM.";
@@ -29,10 +29,11 @@ replacing the running VM. /workspace is shared with the VM.";
 
     async fn run(
         &self,
-        session: &Session,
+        _session: &Session,
+        environment: &Sandbox,
         Arguments { module, modules }: Arguments,
     ) -> Result<Outcome, ToolError> {
-        let failures = session.vm.create(module, modules).await?;
+        let failures = environment.vm.create(module, modules).await?;
         Ok(booted(&failures))
     }
 }

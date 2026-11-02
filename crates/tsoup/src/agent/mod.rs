@@ -4,14 +4,15 @@ use std::sync::Arc;
 
 use tokio::sync::OnceCell;
 
-use self::tools::Toolbox;
+use self::tools::Tools;
 use crate::llm::{LlmClient, LlmError, Message};
-use crate::session::{Entry, Event, Session, SessionError};
+use crate::node::Folder;
+use crate::session::{Entry, Environment, Event, Session, SessionError};
 use crate::settings::SettingsStore;
 use crate::vm::describe;
 
-const SYSTEM_PROMPT: &str = "You are a coding agent working in a session workspace.
-The workspace is at /workspace and persists for the whole session.
+const SANDBOX_PROMPT: &str = "You are a coding agent working in a session workspace.
+The workspace is at /workspace, the working directory of every tool, and persists for the whole session.
 read_file, write_file and edit_file work on the workspace directly and need no VM.
 To run anything, call create_vm with a NixOS module that installs what you need, then use shell.
 The VM is a headless NixOS microVM, and the user always has a terminal into it in their preview pane.
@@ -39,7 +40,7 @@ enum TurnError {
 pub struct Agent {
     llm: LlmClient,
     settings: Arc<SettingsStore>,
-    tools: Toolbox,
+    tools: Tools,
     modules: OnceCell<String>,
 }
 
@@ -48,7 +49,7 @@ impl Agent {
         Self {
             llm: LlmClient::default(),
             settings,
-            tools: Toolbox::new(),
+            tools: Tools::new(),
             modules: OnceCell::new(),
         }
     }
@@ -77,11 +78,11 @@ impl Agent {
         let model = settings.model.as_deref().ok_or(TurnError::NoModel)?;
 
         session.push(Entry::User { text }).await?;
-        let system = self.system_prompt().await;
+        let system = self.system_prompt(&session.environment).await;
 
         loop {
             let messages = conversation(&system, &session.entries().await);
-            let tools = self.tools.definitions(&session.vm.mcp_tools().await);
+            let tools = self.tools.definitions(session).await;
             let reply = self
                 .llm
                 .complete(settings.endpoint(), model, &messages, &tools)
@@ -112,23 +113,45 @@ impl Agent {
         }
     }
 
-    async fn system_prompt(&self) -> String {
+    async fn system_prompt(&self, environment: &Environment) -> String {
+        match environment {
+            Environment::Sandbox(_) => self.sandbox_prompt().await,
+            Environment::Node(folder) => node_prompt(folder),
+        }
+    }
+
+    async fn sandbox_prompt(&self) -> String {
         match self
             .modules
             .get_or_try_init(describe)
             .await
             .map(|modules| modules.trim_end())
         {
-            Ok("") => SYSTEM_PROMPT.to_owned(),
+            Ok("") => SANDBOX_PROMPT.to_owned(),
             Ok(modules) => {
-                format!("{SYSTEM_PROMPT}\nThe modules for create_vm's modules argument:\n{modules}")
+                format!(
+                    "{SANDBOX_PROMPT}\nThe modules for create_vm's modules argument:\n{modules}"
+                )
             },
             Err(error) => {
                 tracing::warn!(%error, "listing the VM modules");
-                SYSTEM_PROMPT.to_owned()
+                SANDBOX_PROMPT.to_owned()
             },
         }
     }
+}
+
+fn node_prompt(folder: &Folder) -> String {
+    format!(
+        "You are a coding agent working directly on the machine {name}, outside any sandbox.
+The working directory is {directory}, shell runs commands there with sh -c.
+read_file, write_file and edit_file resolve relative paths against it and accept absolute paths.
+MCP servers on the machine appear as mcp__<server>__<tool> tools.
+Everything you do happens on the real machine and persists,
+so ask the user before doing anything destructive or hard to undo.",
+        name = folder.node.name,
+        directory = folder.path().display(),
+    )
 }
 
 fn conversation(system: &str, entries: &[Entry]) -> Vec<Message> {

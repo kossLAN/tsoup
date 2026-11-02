@@ -2,32 +2,34 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tsoup_proto::MAX_OUTPUT;
 
-use super::workspace::{blocking, open, relative};
 use super::{Outcome, Tool, ToolError};
 use crate::session::Session;
+use crate::workspace::Workspace;
 
 pub struct ReadFile;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct Arguments {
-    #[schemars(description = "A path inside /workspace")]
+    #[schemars(description = "A path, relative paths resolve against the working directory")]
     path: String,
 }
 
-impl Tool for ReadFile {
+impl<E: Workspace> Tool<E> for ReadFile {
     const NAME: &'static str = "read_file";
-    const DESCRIPTION: &'static str = "Read a file from the workspace.";
+    const DESCRIPTION: &'static str = "Read a file.";
 
     type Arguments = Arguments;
 
     async fn run(
         &self,
-        session: &Session,
+        _session: &Session,
+        environment: &E,
         Arguments { path }: Arguments,
     ) -> Result<Outcome, ToolError> {
-        let workspace = session.workspace();
-        let content =
-            blocking(move || Ok(open(&workspace)?.read_to_string(relative(&path))?)).await?;
+        let content = environment
+            .read(&path)
+            .await?
+            .ok_or(ToolError::NoFile(path))?;
         Ok(Outcome::text(head(content)))
     }
 }

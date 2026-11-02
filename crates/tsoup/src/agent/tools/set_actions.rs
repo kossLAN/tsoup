@@ -4,7 +4,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{Outcome, Tool, ToolError};
-use crate::session::{Action, Session};
+use crate::session::{Action, Sandbox, Session};
 
 pub struct SetActions;
 
@@ -14,7 +14,7 @@ pub struct Arguments {
     actions: Vec<Action>,
 }
 
-impl Tool for SetActions {
+impl Tool<Sandbox> for SetActions {
     const NAME: &'static str = "set_actions";
     const DESCRIPTION: &'static str = "Give the user buttons that run a command in the VM,
 e.g. Run to start the app, so they can do it themselves later without asking you.
@@ -25,6 +25,7 @@ They run detached like shell's background mode, while the VM runs.";
     async fn run(
         &self,
         session: &Session,
+        _environment: &Sandbox,
         Arguments { actions }: Arguments,
     ) -> Result<Outcome, ToolError> {
         let mut labels = HashSet::new();

@@ -3,8 +3,8 @@ import {
 	sessionEvents,
 	type Action,
 	type Entry,
-	type SessionEvent,
-	type VmStatus
+	type EnvironmentStatus,
+	type SessionEvent
 } from './api';
 import { sessions } from './sessions.svelte';
 
@@ -13,10 +13,12 @@ export class Session {
 	entries = $state<Entry[]>([]);
 	actions = $state<Action[]>([]);
 	start = $state(0);
-	vm = $state<VmStatus>({ state: 'stopped', built: false });
+	environment = $state<EnvironmentStatus | null>(null);
 	busy = $state(false);
 	failure = $state<string | null>(null);
 	boots = $state(0);
+
+	vm = $derived(this.environment?.kind === 'sandbox' ? this.environment.vm : null);
 
 	readonly id: string;
 	#events: EventSource;
@@ -56,7 +58,7 @@ export class Session {
 				this.start = event.start - kept.length;
 				this.actions = event.actions;
 				this.busy = event.busy;
-				this.#setVm(event.vm);
+				this.#setEnvironment(event.environment);
 				this.#ready.resolve();
 				break;
 			}
@@ -82,17 +84,21 @@ export class Session {
 			case 'actions':
 				this.actions = event.actions;
 				break;
-			case 'vm':
-				this.#setVm(event.status);
+			case 'environment':
+				this.#setEnvironment(event.environment);
 				break;
 		}
 	}
 
-	#setVm(status: VmStatus) {
-		if (status.state === 'running' && this.vm.state !== 'running') {
+	#setEnvironment(environment: EnvironmentStatus) {
+		if (
+			environment.kind === 'sandbox' &&
+			environment.vm.state === 'running' &&
+			this.vm?.state !== 'running'
+		) {
 			this.boots += 1;
 		}
-		this.vm = status;
+		this.environment = environment;
 	}
 }
 

@@ -36,6 +36,7 @@ async fn proxy(
 ) -> Result<Response, ApiError> {
     let session = state.session(id).await?;
     let socket = session
+        .sandbox()?
         .vm
         .socket(preview)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "the VM serves no such preview"))?;

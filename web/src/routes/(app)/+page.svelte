@@ -1,6 +1,9 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
+	import type { NewEnvironment } from '$lib/api';
 	import Composer from '$lib/components/Composer.svelte';
+	import EnvironmentPicker from '$lib/components/EnvironmentPicker.svelte';
+	import FolderPicker from '$lib/components/FolderPicker.svelte';
 	import ModelNotice from '$lib/components/ModelNotice.svelte';
 	import Wordmark from '$lib/components/Wordmark.svelte';
 	import { WarningCircleIcon } from '$lib/icons';
@@ -10,11 +13,22 @@
 	const prompt = pick(prompts);
 
 	let failure = $state<string | null>(null);
+	let node = $state<string | null>(null);
+	let folder = $state('');
+
+	const connected = $derived(sessions.nodes.some(({ name }) => name === node) ? node : null);
 
 	async function send(text: string): Promise<boolean> {
 		failure = null;
+		if (connected !== null && !folder) {
+			failure = 'Choose a folder for the session to work in';
+			return false;
+		}
+
+		const environment: NewEnvironment =
+			connected === null ? { kind: 'sandbox' } : { kind: 'node', name: connected, folder };
 		try {
-			const session = await sessions.create();
+			const session = await sessions.create(environment);
 			sessions.pending.set(session.id, text);
 			await goto(`/sessions/${session.id}`);
 			return true;
@@ -36,5 +50,23 @@
 		</div>
 	{/if}
 	<ModelNotice />
-	<Composer onsend={send} />
+	<Composer onsend={send}>
+		{#snippet accessory()}
+			{#if sessions.nodes.length}
+				<EnvironmentPicker
+					nodes={sessions.nodes}
+					bind:value={
+						() => connected,
+						(value) => {
+							node = value;
+							folder = '';
+						}
+					}
+				/>
+				{#if connected !== null}
+					<FolderPicker node={connected} bind:value={folder} />
+				{/if}
+			{/if}
+		{/snippet}
+	</Composer>
 </div>

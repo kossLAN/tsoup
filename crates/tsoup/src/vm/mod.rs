@@ -7,18 +7,18 @@ use std::process::{ExitStatus, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures_util::{SinkExt as _, StreamExt as _};
 use serde::Serialize;
-use tokio::net::{UnixListener, UnixStream};
+use tokio::net::UnixListener;
 use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, watch};
-use tokio_util::codec::Framed;
-use tsoup_proto::{CodecError, Frame, HostCodec, McpFailure, McpTool, Request, Response};
+use tsoup_proto::guest::{Guest, Request, Response};
+use tsoup_proto::{McpFailure, McpListing, McpTool, mcp, workspace};
 
 use self::build::RUNNER_LINK;
 pub use self::build::{BuildError, Builder, describe};
 pub use self::preview::Preview;
-use crate::session::{Event, Events, WORKSPACE_DIR};
+use crate::rpc::{Connection, RpcError};
+use crate::session::{EnvironmentStatus, Event, Events, WORKSPACE_DIR};
 
 const AGENT_SOCKET: &str = "agent.sock";
 const CONSOLE_LOG: &str = "console.log";
@@ -63,14 +63,8 @@ pub enum VmError {
         "the VM has no preview named {0} that can show a port, enable the module that provides it"
     )]
     NoForward(String),
-    #[error("talking to the guest agent: {0}")]
-    Guest(#[from] CodecError),
-    #[error("the guest agent hung up")]
-    Disconnected,
-    #[error("the guest agent failed: {0}")]
-    GuestFailed(String),
-    #[error("the guest agent sent an unexpected response")]
-    UnexpectedResponse,
+    #[error("the guest agent {0}")]
+    Guest(#[from] RpcError),
 }
 
 pub struct Vm {
@@ -224,27 +218,30 @@ impl Vm {
             .unwrap_or_default()
     }
 
-    pub async fn request(&self, request: Request) -> Result<Response, VmError> {
-        self.exchange(&mut *self.running.lock().await, request)
-            .await
+    pub async fn workspace(
+        &self,
+        request: workspace::Request,
+    ) -> Result<workspace::Response, VmError> {
+        match self.request(Request::Workspace(request)).await? {
+            Response::Workspace(response) => Ok(response),
+            _ => Err(RpcError::UnexpectedResponse.into()),
+        }
     }
 
-    pub async fn spawn(&self, command: String) -> Result<(), VmError> {
-        match self.request(Request::Spawn { command }).await? {
-            Response::Spawned => Ok(()),
-            Response::Failed { message } => Err(VmError::GuestFailed(message)),
-            _ => Err(VmError::UnexpectedResponse),
+    pub async fn mcp(&self, request: mcp::Request) -> Result<mcp::Response, VmError> {
+        match self.request(Request::Mcp(request)).await? {
+            Response::Mcp(response) => Ok(response),
+            _ => Err(RpcError::UnexpectedResponse.into()),
         }
     }
 
     pub async fn show_preview(&self, name: &str, port: u16) -> Result<(), VmError> {
-        let mut running = self.running.lock().await;
-        self.forward(&mut running, name, port, true).await
+        self.forward(name, port, true).await
     }
 
     pub async fn restore_previews(&self) -> Result<(), VmError> {
-        let mut running = self.running.lock().await;
         let mut targets = Preview::saved_targets(&self.dir).await;
+        let running = self.running.lock().await;
 
         targets.retain(|name, _| {
             running
@@ -252,22 +249,20 @@ impl Vm {
                 .and_then(|vm| vm.forwarded(name))
                 .is_some_and(|preview| preview.target.is_none())
         });
+        drop(running);
 
         for (name, port) in targets {
-            self.forward(&mut running, &name, port, false).await?;
+            self.forward(&name, port, false).await?;
         }
 
         Ok(())
     }
 
-    async fn forward(
-        &self,
-        running: &mut Option<Running>,
-        name: &str,
-        port: u16,
-        require_listener: bool,
-    ) -> Result<(), VmError> {
-        let from = running
+    async fn forward(&self, name: &str, port: u16, require_listener: bool) -> Result<(), VmError> {
+        let from = self
+            .running
+            .lock()
+            .await
             .as_ref()
             .ok_or(VmError::NotRunning)?
             .forwarded(name)
@@ -280,13 +275,11 @@ impl Vm {
             require_listener,
         };
 
-        match self.exchange(running, request).await? {
-            Response::Forwarded => {},
-            Response::Failed { message } => return Err(VmError::GuestFailed(message)),
-            _ => return Err(VmError::UnexpectedResponse),
+        if !matches!(self.request(request).await?, Response::Done) {
+            return Err(RpcError::UnexpectedResponse.into());
         }
 
-        if let Some(vm) = running.as_mut() {
+        if let Some(vm) = self.running.lock().await.as_mut() {
             if let Some(preview) = vm.forwarded_mut(name) {
                 preview.target = Some(port);
             }
@@ -301,22 +294,32 @@ impl Vm {
         Ok(())
     }
 
-    async fn exchange(
-        &self,
-        running: &mut Option<Running>,
-        request: Request,
-    ) -> Result<Response, VmError> {
-        let vm = running.as_mut().ok_or(VmError::NotRunning)?;
+    async fn request(&self, request: Request) -> Result<Response, VmError> {
+        let guest = self
+            .running
+            .lock()
+            .await
+            .as_ref()
+            .ok_or(VmError::NotRunning)?
+            .guest
+            .clone();
+        let response = guest.request(request).await;
 
-        match vm.guest.request(request).await {
-            Ok(response) => Ok(response),
-            Err(error) => {
-                stop(running).await;
-                self.set_state(VmState::Failed {
-                    message: error.to_string(),
-                });
-                Err(error)
-            },
+        if guest.is_closed() {
+            self.lost().await;
+        }
+
+        Ok(response?)
+    }
+
+    async fn lost(&self) {
+        let mut running = self.running.lock().await;
+
+        if running.as_ref().is_some_and(|vm| vm.guest.is_closed()) {
+            stop(&mut running).await;
+            self.set_state(VmState::Failed {
+                message: VmError::Guest(RpcError::Disconnected).to_string(),
+            });
         }
     }
 
@@ -326,8 +329,8 @@ impl Vm {
 
     fn update(&self, change: impl FnOnce(&mut VmStatus)) {
         self.status.send_modify(change);
-        self.events.emit(Event::Vm {
-            status: self.status(),
+        self.events.emit(Event::Environment {
+            environment: EnvironmentStatus::Sandbox { vm: self.status() },
         });
     }
 }
@@ -342,7 +345,7 @@ async fn stop(running: &mut Option<Running>) {
 
 struct Running {
     process: Child,
-    guest: Guest,
+    guest: Connection<Guest>,
     previews: Vec<Preview>,
     tools: Vec<McpTool>,
 }
@@ -385,12 +388,13 @@ impl Running {
 
         let connect = async {
             let (stream, _) = listener.accept().await?;
-            let mut guest = Guest::new(stream);
-            guest.request(Request::Ping).await?;
+            let guest = Connection::<Guest>::open(stream);
 
-            match guest.request(Request::McpTools).await? {
-                Response::McpTools { tools, failures } => Ok((guest, tools, failures)),
-                _ => Err(VmError::UnexpectedResponse),
+            match guest.request(Request::Mcp(mcp::Request::Tools)).await? {
+                Response::Mcp(mcp::Response::Tools(McpListing { tools, failures })) => {
+                    Ok((guest, tools, failures))
+                },
+                _ => Err(VmError::Guest(RpcError::UnexpectedResponse)),
             }
         };
 
@@ -433,33 +437,5 @@ impl Running {
         self.previews
             .iter_mut()
             .find(|preview| preview.forwarded && preview.name == name)
-    }
-}
-
-struct Guest {
-    framed: Framed<UnixStream, HostCodec>,
-    last_id: u64,
-}
-
-impl Guest {
-    fn new(stream: UnixStream) -> Self {
-        Self {
-            framed: Framed::new(stream, HostCodec::default()),
-            last_id: 0,
-        }
-    }
-
-    async fn request(&mut self, body: Request) -> Result<Response, VmError> {
-        self.last_id += 1;
-        let id = self.last_id;
-        self.framed.send(Frame { id, body }).await?;
-
-        loop {
-            let frame = self.framed.next().await.ok_or(VmError::Disconnected)??;
-
-            if frame.id == id {
-                return Ok(frame.body);
-            }
-        }
     }
 }

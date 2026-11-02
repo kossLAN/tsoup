@@ -1,56 +1,35 @@
-use std::io;
-
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::workspace::{blocking, changed, open, relative};
 use super::{Outcome, Tool, ToolError};
 use crate::session::Session;
+use crate::workspace::Workspace;
 
 pub struct WriteFile;
 
 #[derive(Deserialize, JsonSchema)]
 pub struct Arguments {
-    #[schemars(description = "A path inside /workspace")]
+    #[schemars(description = "A path, relative paths resolve against the working directory")]
     path: String,
     #[schemars(description = "The complete new contents of the file")]
     content: String,
 }
 
-impl Tool for WriteFile {
+impl<E: Workspace> Tool<E> for WriteFile {
     const NAME: &'static str = "write_file";
-    const DESCRIPTION: &'static str = "Create or overwrite a file in the workspace.";
+    const DESCRIPTION: &'static str = "Create or overwrite a file.";
 
     type Arguments = Arguments;
 
     async fn run(
         &self,
-        session: &Session,
+        _session: &Session,
+        environment: &E,
         Arguments { path, content }: Arguments,
     ) -> Result<Outcome, ToolError> {
-        let workspace = session.workspace();
-        let target = path.clone();
-        let (before, after) = blocking(move || {
-            let dir = open(&workspace)?;
-            let file = relative(&target);
-
-            let before = match dir.read_to_string(file) {
-                Ok(before) => before,
-                Err(error) if error.kind() == io::ErrorKind::NotFound => String::new(),
-                Err(error) => return Err(error.into()),
-            };
-
-            if let Some(parent) = file
-                .parent()
-                .filter(|parent| !parent.as_os_str().is_empty())
-            {
-                dir.create_dir_all(parent)?;
-            }
-
-            dir.write(file, &content)?;
-            Ok((before, content))
-        })
-        .await?;
-        Ok(changed(path, &before, &after))
+        let before = environment.read(&path).await?.unwrap_or_default();
+        let outcome = Outcome::changed(&path, &before, &content);
+        environment.write(&path, content).await?;
+        Ok(outcome)
     }
 }

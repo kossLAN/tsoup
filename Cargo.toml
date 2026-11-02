@@ -9,6 +9,7 @@ rust-version = "1.88"
 
 [workspace.dependencies]
 tsoup-proto = { path = "crates/proto" }
+tsoup-workspace = { path = "crates/workspace" }
 
 anyhow = "1.0.104"
 axum = "0.8.9"
@@ -16,6 +17,7 @@ bytes = "1.12.1"
 cap-std = "4.0.3"
 clap = { version = "4.6.7", features = ["derive", "env"] }
 futures-util = { version = "0.3.34", features = ["sink"] }
+gethostname = "1.1.0"
 hyper = { version = "1.12.0", features = ["client", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
 rmcp = { version = "3.8.0", default-features = false, features = [

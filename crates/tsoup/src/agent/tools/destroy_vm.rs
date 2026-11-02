@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{Outcome, Tool, ToolError};
-use crate::session::Session;
+use crate::session::{Sandbox, Session};
 
 pub struct DestroyVm;
 
@@ -13,14 +13,19 @@ pub struct DestroyVm;
 #[derive(Deserialize, JsonSchema)]
 pub struct Arguments {}
 
-impl Tool for DestroyVm {
+impl Tool<Sandbox> for DestroyVm {
     const NAME: &'static str = "destroy_vm";
     const DESCRIPTION: &'static str = "Shut the VM down.";
 
     type Arguments = Arguments;
 
-    async fn run(&self, session: &Session, Arguments {}: Arguments) -> Result<Outcome, ToolError> {
-        session.vm.destroy().await;
+    async fn run(
+        &self,
+        _session: &Session,
+        environment: &Sandbox,
+        Arguments {}: Arguments,
+    ) -> Result<Outcome, ToolError> {
+        environment.vm.destroy().await;
         Ok(Outcome::text("the VM was destroyed"))
     }
 }
