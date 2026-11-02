@@ -61,6 +61,7 @@ export type SessionEvent =
 			start: number;
 			entries: Entry[];
 			actions: Action[];
+			selection: Selection;
 			environment: EnvironmentStatus;
 			busy: boolean;
 	  }
@@ -70,7 +71,8 @@ export type SessionEvent =
 	| { type: 'turn_failed'; message: string }
 	| { type: 'turn_cancelled' }
 	| { type: 'environment'; environment: EnvironmentStatus }
-	| { type: 'actions'; actions: Action[] };
+	| { type: 'actions'; actions: Action[] }
+	| { type: 'selection'; selection: Selection };
 
 export type ListEvent =
 	| { type: 'snapshot'; sessions: SessionSummary[]; nodes: NodeSummary[] }
@@ -101,8 +103,15 @@ export async function listFolders(node: string): Promise<string[]> {
 	return (await request('GET', `/api/nodes/${encodeURIComponent(node)}/folders`)).json();
 }
 
-export async function createSession(environment: NewEnvironment): Promise<SessionSummary> {
-	return (await request('POST', '/api/sessions', environment)).json();
+export async function createSession(
+	environment: NewEnvironment,
+	selection: Selection
+): Promise<SessionSummary> {
+	return (await request('POST', '/api/sessions', { environment, selection })).json();
+}
+
+export async function patchSession(id: string, patch: { selection?: Selection }): Promise<void> {
+	await request('PATCH', `/api/sessions/${id}`, patch);
 }
 
 export async function deleteSession(id: string): Promise<void> {
@@ -150,26 +159,55 @@ export function previewUrl(id: string, preview: Preview): string {
 	return `${location.protocol}//${preview.name}.${id}.${origin}${preview.path}`;
 }
 
-export type Settings = {
-	llm_url: string;
-	has_llm_key: boolean;
-	model: string | null;
+export type ProviderKind = 'chat_completions' | 'responses' | 'anthropic';
+
+export type Provider = {
+	id: string;
+	name: string;
+	kind: ProviderKind;
+	url: string;
+	has_key: boolean;
 };
 
-export type SettingsUpdate = {
-	llm_url: string;
-	llm_key?: string;
-	model: string | null;
+export type ModelChoice = {
+	provider: string;
+	name: string;
+};
+
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh';
+
+export type Selection = {
+	model: ModelChoice | null;
+	effort: Effort | null;
+};
+
+export type Settings = {
+	providers: Provider[];
+	default_model: ModelChoice | null;
+	last_effort: Effort | null;
+};
+
+export type ProviderUpdate = {
+	id: string | null;
+	name: string;
+	kind: ProviderKind;
+	url: string;
+	key?: string;
+};
+
+export type SettingsPatch = {
+	providers?: ProviderUpdate[];
+	default_model?: ModelChoice;
 };
 
 export async function getSettings(): Promise<Settings> {
 	return (await request('GET', '/api/settings')).json();
 }
 
-export async function saveSettings(update: SettingsUpdate): Promise<Settings> {
-	return (await request('PUT', '/api/settings', update)).json();
+export async function patchSettings(patch: SettingsPatch): Promise<Settings> {
+	return (await request('PATCH', '/api/settings', patch)).json();
 }
 
-export async function listModels(): Promise<string[]> {
-	return (await request('GET', '/api/models')).json();
+export async function listModels(provider: string): Promise<string[]> {
+	return (await request('GET', `/api/providers/${provider}/models`)).json();
 }

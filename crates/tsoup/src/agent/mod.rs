@@ -2,13 +2,14 @@ mod tools;
 
 use std::sync::Arc;
 
+use reqwest::Client;
 use tokio::sync::OnceCell;
 
 use self::tools::Tools;
-use crate::llm::{LlmClient, LlmError, Message};
+use crate::llm::{LlmError, Message};
 use crate::node::Folder;
 use crate::session::{Entry, Environment, Event, Session, SessionError};
-use crate::settings::SettingsStore;
+use crate::settings::{ProviderSettings, SettingsStore};
 use crate::vm::describe;
 
 const SANDBOX_PROMPT: &str = "You are a coding agent working in a session workspace.
@@ -33,12 +34,14 @@ enum TurnError {
     Session(#[from] SessionError),
     #[error(transparent)]
     Llm(#[from] LlmError),
-    #[error("no model is configured, choose one in settings")]
+    #[error("no model is selected, choose one from the model menu")]
     NoModel,
+    #[error("the selected model's provider was removed, choose another model")]
+    MissingProvider,
 }
 
 pub struct Agent {
-    llm: LlmClient,
+    http: Client,
     settings: Arc<SettingsStore>,
     tools: Tools,
     modules: OnceCell<String>,
@@ -47,16 +50,15 @@ pub struct Agent {
 impl Agent {
     pub fn new(settings: Arc<SettingsStore>) -> Self {
         Self {
-            llm: LlmClient::default(),
+            http: Client::default(),
             settings,
             tools: Tools::new(),
             modules: OnceCell::new(),
         }
     }
 
-    pub async fn models(&self) -> Result<Vec<String>, LlmError> {
-        let settings = self.settings.get().await;
-        self.llm.models(settings.endpoint()).await
+    pub async fn models(&self, provider: &ProviderSettings) -> Result<Vec<String>, LlmError> {
+        provider.connect(&self.http).models().await
     }
 
     pub async fn run_turn(self: Arc<Self>, session: Arc<Session>, text: String) {
@@ -75,7 +77,15 @@ impl Agent {
 
     async fn turn(&self, session: &Session, text: String) -> Result<(), TurnError> {
         let settings = self.settings.get().await;
-        let model = settings.model.as_deref().ok_or(TurnError::NoModel)?;
+        let selection = session.selection().await;
+        let model = selection
+            .model
+            .or_else(|| settings.default_model.clone())
+            .ok_or(TurnError::NoModel)?;
+        let llm = settings
+            .provider(model.provider)
+            .ok_or(TurnError::MissingProvider)?
+            .connect(&self.http);
 
         session.push(Entry::User { text }).await?;
         let system = self.system_prompt(&session.environment).await;
@@ -83,9 +93,8 @@ impl Agent {
         loop {
             let messages = conversation(&system, &session.entries().await);
             let tools = self.tools.definitions(session).await;
-            let reply = self
-                .llm
-                .complete(settings.endpoint(), model, &messages, &tools)
+            let reply = llm
+                .complete(&model.name, selection.effort, &messages, &tools)
                 .await?;
             let calls = reply.tool_calls.clone();
             session

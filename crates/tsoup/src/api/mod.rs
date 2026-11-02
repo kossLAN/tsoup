@@ -9,7 +9,7 @@ use axum::extract::{Path as UrlPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::Sse;
 use axum::response::sse::{self, KeepAlive};
-use axum::routing::{delete, get, post};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use futures_util::{Stream, StreamExt as _, stream};
 use serde::{Deserialize, Serialize};
@@ -20,7 +20,7 @@ use uuid::Uuid;
 pub use self::error::ApiError;
 use crate::agent::Agent;
 use crate::session::{EntryPage, NewEnvironment, Session, SessionSummary, Sessions};
-use crate::settings::{SettingsStore, SettingsUpdate, SettingsView};
+use crate::settings::{Selection, SettingsPatch, SettingsStore, SettingsView};
 use crate::workspace::Workspace as _;
 
 #[derive(Clone)]
@@ -53,11 +53,14 @@ impl AppState {
 
 pub fn router(state: AppState) -> Router {
     Router::new()
-        .route("/api/settings", get(get_settings).put(update_settings))
-        .route("/api/models", get(list_models))
+        .route("/api/settings", get(get_settings).patch(update_settings))
+        .route("/api/providers/{id}/models", get(list_models))
         .route("/api/events", get(list_events))
         .route("/api/sessions", get(list_sessions).post(create_session))
-        .route("/api/sessions/{id}", delete(delete_session))
+        .route(
+            "/api/sessions/{id}",
+            patch(update_session).delete(delete_session),
+        )
         .route("/api/sessions/{id}/events", get(events))
         .route("/api/sessions/{id}/entries", get(list_entries))
         .route("/api/sessions/{id}/turns", post(start_turn))
@@ -89,19 +92,37 @@ struct ActionRequest {
     label: String,
 }
 
+#[derive(Deserialize)]
+struct NewSession {
+    environment: NewEnvironment,
+    selection: Option<Selection>,
+}
+
+#[derive(Deserialize)]
+struct SessionPatch {
+    selection: Option<Selection>,
+}
+
 async fn get_settings(State(state): State<AppState>) -> Json<SettingsView> {
     Json(state.settings.view().await)
 }
 
 async fn update_settings(
     State(state): State<AppState>,
-    Json(update): Json<SettingsUpdate>,
+    Json(patch): Json<SettingsPatch>,
 ) -> Result<Json<SettingsView>, ApiError> {
-    Ok(Json(state.settings.update(update).await?))
+    Ok(Json(state.settings.update(patch).await?))
 }
 
-async fn list_models(State(state): State<AppState>) -> Result<Json<Vec<String>>, ApiError> {
-    Ok(Json(state.agent.models().await?))
+async fn list_models(
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<Uuid>,
+) -> Result<Json<Vec<String>>, ApiError> {
+    let settings = state.settings.get().await;
+    let provider = settings
+        .provider(id)
+        .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such provider"))?;
+    Ok(Json(state.agent.models(provider).await?))
 }
 
 async fn list_sessions(State(state): State<AppState>) -> Json<Vec<SessionSummary>> {
@@ -117,10 +138,49 @@ async fn list_events(
 
 async fn create_session(
     State(state): State<AppState>,
-    Json(environment): Json<NewEnvironment>,
+    Json(request): Json<NewSession>,
 ) -> Result<(StatusCode, Json<SessionSummary>), ApiError> {
-    let session = state.sessions.create(environment).await?;
+    let settings = state.settings.get().await;
+    let requested = request.selection.unwrap_or(Selection {
+        model: None,
+        effort: settings.last_effort,
+    });
+    let selection = Selection {
+        model: requested.model.or_else(|| settings.default_model.clone()),
+        effort: requested.effort,
+    };
+
+    if let Some(model) = &selection.model {
+        settings.check(model)?;
+    }
+
+    let effort = selection.effort;
+    let session = state
+        .sessions
+        .create(request.environment, selection)
+        .await?;
+    state.settings.remember_effort(effort).await?;
     Ok((StatusCode::CREATED, Json(session.summary().await)))
+}
+
+async fn update_session(
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<Uuid>,
+    Json(patch): Json<SessionPatch>,
+) -> Result<StatusCode, ApiError> {
+    let session = state.session(id).await?;
+
+    if let Some(selection) = patch.selection {
+        if let Some(model) = &selection.model {
+            state.settings.get().await.check(model)?;
+        }
+
+        let effort = selection.effort;
+        session.select(selection).await?;
+        state.settings.remember_effort(effort).await?;
+    }
+
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn delete_session(

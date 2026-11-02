@@ -1,9 +1,18 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
 	import { page } from '$app/state';
-	import { cancelTurn, destroyVm, runAction, startTurn, startVm } from '$lib/api';
+	import {
+		cancelTurn,
+		destroyVm,
+		patchSession,
+		runAction,
+		startTurn,
+		startVm,
+		type Selection
+	} from '$lib/api';
 	import Composer from '$lib/components/Composer.svelte';
 	import ModelNotice from '$lib/components/ModelNotice.svelte';
+	import ModelPicker from '$lib/components/ModelPicker.svelte';
 	import PreviewPane from '$lib/components/PreviewPane.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
 	import { DesktopTowerIcon, FolderIcon, MonitorIcon, PlayIcon } from '$lib/icons';
@@ -74,6 +83,15 @@
 			failure = error instanceof Error ? error.message : String(error);
 		}
 	}
+
+	async function select(selection: Selection) {
+		failure = null;
+		try {
+			await patchSession(session.id, { selection });
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
+		}
+	}
 </script>
 
 <div class="flex min-w-0 flex-1">
@@ -122,7 +140,11 @@
 			/>
 		{/key}
 		<ModelNotice />
-		<Composer busy={session.busy} onsend={send} onstop={() => cancelTurn(session.id)} />
+		<Composer busy={session.busy} onsend={send} onstop={() => cancelTurn(session.id)}>
+			{#snippet accessory()}
+				<ModelPicker selection={session.selection} onchange={select} />
+			{/snippet}
+		</Composer>
 	</div>
 
 	{#if vm && active && !hidden}

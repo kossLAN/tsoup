@@ -4,6 +4,7 @@ import {
 	type Action,
 	type Entry,
 	type EnvironmentStatus,
+	type Selection,
 	type SessionEvent
 } from './api';
 import { sessions } from './sessions.svelte';
@@ -12,6 +13,7 @@ export class Session {
 	title = $state('');
 	entries = $state<Entry[]>([]);
 	actions = $state<Action[]>([]);
+	selection = $state<Selection>({ model: null, effort: null });
 	start = $state(0);
 	environment = $state<EnvironmentStatus | null>(null);
 	busy = $state(false);
@@ -57,6 +59,7 @@ export class Session {
 				this.entries = [...kept, ...event.entries];
 				this.start = event.start - kept.length;
 				this.actions = event.actions;
+				this.selection = event.selection;
 				this.busy = event.busy;
 				this.#setEnvironment(event.environment);
 				this.#ready.resolve();
@@ -83,6 +86,9 @@ export class Session {
 				break;
 			case 'actions':
 				this.actions = event.actions;
+				break;
+			case 'selection':
+				this.selection = event.selection;
 				break;
 			case 'environment':
 				this.#setEnvironment(event.environment);

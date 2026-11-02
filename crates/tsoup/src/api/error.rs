@@ -62,8 +62,15 @@ impl From<SessionError> for ApiError {
 
 impl From<SettingsError> for ApiError {
     fn from(error: SettingsError) -> Self {
-        tracing::error!(%error, "saving settings failed");
-        Self::new(StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+        let status = match error {
+            SettingsError::UnknownProvider | SettingsError::MissingUrl => StatusCode::BAD_REQUEST,
+            SettingsError::Io(_) | SettingsError::Json(_) => {
+                tracing::error!(%error, "saving settings failed");
+                StatusCode::INTERNAL_SERVER_ERROR
+            },
+        };
+
+        Self::new(status, error.to_string())
     }
 }
 

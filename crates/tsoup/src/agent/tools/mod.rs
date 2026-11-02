@@ -25,7 +25,7 @@ use self::set_actions::SetActions;
 use self::shell::Shell;
 use self::show_preview::ShowPreview;
 use self::write_file::WriteFile;
-use crate::llm::{FunctionCall, FunctionDefinition, ToolCall, ToolDefinition, ToolKind};
+use crate::llm::{FunctionCall, ToolCall, ToolDefinition};
 use crate::node::Folder;
 use crate::session::{Environment, FileDiff, Sandbox, Session, SessionError};
 use crate::vm::VmError;
@@ -148,12 +148,9 @@ where
             .into_generator()
             .into_root_schema_for::<T::Arguments>();
         ToolDefinition {
-            kind: ToolKind::Function,
-            function: FunctionDefinition {
-                name: T::NAME.into(),
-                description: T::DESCRIPTION.into(),
-                parameters,
-            },
+            name: T::NAME.into(),
+            description: T::DESCRIPTION.into(),
+            parameters,
         }
     }
 

@@ -2,7 +2,7 @@ use schemars::Schema;
 use tsoup_proto::{McpOutput, McpTool};
 
 use super::{Outcome, ToolError, arguments};
-use crate::llm::{FunctionDefinition, ToolDefinition, ToolKind};
+use crate::llm::ToolDefinition;
 use crate::workspace::Workspace;
 
 const PREFIX: &str = "mcp__";
@@ -12,12 +12,9 @@ pub fn definition(tool: &McpTool) -> Option<ToolDefinition> {
     let parameters = Schema::try_from(tool.input_schema.clone()).ok()?;
 
     Some(ToolDefinition {
-        kind: ToolKind::Function,
-        function: FunctionDefinition {
-            name: format!("{PREFIX}{}{SEPARATOR}{}", tool.server, tool.name).into(),
-            description: tool.description.clone().into(),
-            parameters,
-        },
+        name: format!("{PREFIX}{}{SEPARATOR}{}", tool.server, tool.name).into(),
+        description: tool.description.clone().into(),
+        parameters,
     })
 }
 

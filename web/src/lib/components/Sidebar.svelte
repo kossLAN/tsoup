@@ -164,7 +164,7 @@
 			<a
 				class={[
 					'nav-item gap-2.5 px-1.75',
-					page.url.pathname === '/settings' && 'bg-alternate-base'
+					page.url.pathname.startsWith('/settings') && 'bg-alternate-base'
 				]}
 				href="/settings"
 			>

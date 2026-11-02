@@ -27,6 +27,7 @@
 </script>
 
 <button
+	type="button"
 	class={['menu-item', danger && 'text-danger']}
 	role="menuitem"
 	tabindex="-1"

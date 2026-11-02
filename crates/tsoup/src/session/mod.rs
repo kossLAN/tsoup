@@ -18,6 +18,7 @@ pub use self::entry::{Action, Entry, Event, FileDiff, Record};
 pub use self::environment::{Environment, EnvironmentStatus, NewEnvironment};
 pub use self::sandbox::{Sandbox, WORKSPACE_DIR};
 use crate::node::{Folder, Node, NodeError, NodeSummary};
+use crate::settings::Selection;
 use crate::vm::Builder;
 
 const EVENT_BUFFER: usize = 256;
@@ -137,6 +138,7 @@ struct SessionData {
     title: String,
     entries: Vec<Entry>,
     actions: Vec<Action>,
+    selection: Selection,
 }
 
 impl SessionData {
@@ -162,6 +164,7 @@ impl SessionData {
                 self.entries.push(entry.clone());
             },
             Record::Actions { actions } => self.actions.clone_from(actions),
+            Record::Selection { selection } => self.selection.clone_from(selection),
         }
     }
 }
@@ -261,7 +264,11 @@ impl Sessions {
         Ok(node.folders().await?)
     }
 
-    pub async fn create(&self, environment: NewEnvironment) -> Result<Arc<Session>, SessionError> {
+    pub async fn create(
+        &self,
+        environment: NewEnvironment,
+        selection: Selection,
+    ) -> Result<Arc<Session>, SessionError> {
         let id = Uuid::now_v7();
         let events = self.events(id);
         let nodes = self.nodes.read().await;
@@ -297,6 +304,7 @@ impl Sessions {
             SessionData::default(),
             events,
         ));
+        session.select(selection).await?;
         self.insert(Arc::clone(&session)).await;
         Ok(session)
     }
@@ -461,6 +469,14 @@ impl Session {
         self.record(Record::Actions { actions }).await
     }
 
+    pub async fn select(&self, selection: Selection) -> Result<(), SessionError> {
+        self.record(Record::Selection { selection }).await
+    }
+
+    pub async fn selection(&self) -> Selection {
+        self.data.lock().await.selection.clone()
+    }
+
     pub async fn action(&self, label: &str) -> Option<Action> {
         self.data
             .lock()
@@ -484,6 +500,7 @@ impl Session {
             start,
             entries: data.entries[start..].to_vec(),
             actions: data.actions.clone(),
+            selection: data.selection.clone(),
             environment: self.environment.status(),
             busy: self.busy().await,
         };

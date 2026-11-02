@@ -1,22 +1,29 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import type { NewEnvironment } from '$lib/api';
+	import { getSettings, type NewEnvironment, type Selection } from '$lib/api';
 	import Composer from '$lib/components/Composer.svelte';
 	import EnvironmentPicker from '$lib/components/EnvironmentPicker.svelte';
 	import FolderPicker from '$lib/components/FolderPicker.svelte';
 	import ModelNotice from '$lib/components/ModelNotice.svelte';
+	import ModelPicker from '$lib/components/ModelPicker.svelte';
 	import Wordmark from '$lib/components/Wordmark.svelte';
 	import { WarningCircleIcon } from '$lib/icons';
 	import { sessions } from '$lib/sessions.svelte';
 	import { pick, prompts } from '$lib/soup';
+	import { onMount } from 'svelte';
 
 	const prompt = pick(prompts);
 
 	let failure = $state<string | null>(null);
 	let node = $state<string | null>(null);
 	let folder = $state('');
+	let selection = $state<Selection>({ model: null, effort: null });
 
 	const connected = $derived(sessions.nodes.some(({ name }) => name === node) ? node : null);
+
+	onMount(async () => {
+		selection.effort = (await getSettings()).last_effort;
+	});
 
 	async function send(text: string): Promise<boolean> {
 		failure = null;
@@ -28,7 +35,7 @@
 		const environment: NewEnvironment =
 			connected === null ? { kind: 'sandbox' } : { kind: 'node', name: connected, folder };
 		try {
-			const session = await sessions.create(environment);
+			const session = await sessions.create(environment, selection);
 			sessions.pending.set(session.id, text);
 			await goto(`/sessions/${session.id}`);
 			return true;
@@ -52,6 +59,7 @@
 	<ModelNotice />
 	<Composer onsend={send}>
 		{#snippet accessory()}
+			<ModelPicker {selection} onchange={(next) => (selection = next)} />
 			{#if sessions.nodes.length}
 				<EnvironmentPicker
 					nodes={sessions.nodes}

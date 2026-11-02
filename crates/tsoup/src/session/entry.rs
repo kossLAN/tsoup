@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 
 use super::EnvironmentStatus;
 use crate::llm::ToolCall;
+use crate::settings::Selection;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -41,6 +42,7 @@ pub struct Action {
 pub enum Record {
     Entry { entry: Entry },
     Actions { actions: Vec<Action> },
+    Selection { selection: Selection },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -51,6 +53,7 @@ pub enum Event {
         start: usize,
         entries: Vec<Entry>,
         actions: Vec<Action>,
+        selection: Selection,
         environment: EnvironmentStatus,
         busy: bool,
     },
@@ -69,6 +72,9 @@ pub enum Event {
     Actions {
         actions: Vec<Action>,
     },
+    Selection {
+        selection: Selection,
+    },
 }
 
 impl From<Record> for Event {
@@ -76,6 +82,7 @@ impl From<Record> for Event {
         match record {
             Record::Entry { entry } => Self::Entry { entry },
             Record::Actions { actions } => Self::Actions { actions },
+            Record::Selection { selection } => Self::Selection { selection },
         }
     }
 }

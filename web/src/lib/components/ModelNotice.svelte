@@ -5,14 +5,14 @@
 	let missing = $state(false);
 
 	onMount(async () => {
-		missing = !(await getSettings()).model;
+		missing = !(await getSettings()).providers.length;
 	});
 </script>
 
 {#if missing}
 	<div class="mx-auto w-full max-w-chat px-7 pb-2 text-secondary">
-		No model is configured. <a class="text-accent underline" href="/settings"
-			>Choose one in settings</a
+		No model provider is configured. <a class="text-accent underline" href="/settings"
+			>Add one in settings</a
 		>
 	</div>
 {/if}
