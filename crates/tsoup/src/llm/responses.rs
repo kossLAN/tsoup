@@ -1,10 +1,13 @@
+use std::ops::ControlFlow;
+
 use futures_util::future::BoxFuture;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
+use super::stream::{Collector, Data, Events};
 use super::{
-    Effort, Endpoint, FunctionCall, LlmError, Message, Provider, Reply, ToolCall, ToolDefinition,
-    ToolKind, joined, list_models, send,
+    Effort, Endpoint, LlmError, Message, OnProgress, Provider, Reply, ToolCall, ToolDefinition,
+    ToolKind, list_models, send,
 };
 
 pub struct Responses(pub Endpoint);
@@ -17,11 +20,19 @@ struct ResponsesRequest<'a> {
     input: Vec<Item<'a>>,
     tools: Vec<FunctionTool<'a>>,
     store: bool,
+    stream: bool,
 }
 
 #[derive(Serialize)]
 struct Reasoning {
     effort: Effort,
+    summary: Summary,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+enum Summary {
+    Auto,
 }
 
 #[derive(Serialize)]
@@ -60,36 +71,56 @@ struct FunctionTool<'a> {
 }
 
 #[derive(Deserialize)]
-struct ResponsesResponse {
-    output: Vec<OutputItem>,
+#[serde(tag = "type")]
+enum StreamEvent {
+    #[serde(rename = "response.output_item.added")]
+    ItemAdded {
+        output_index: usize,
+        item: AddedItem,
+    },
+    #[serde(rename = "response.content_part.added")]
+    ContentPartAdded,
+    #[serde(
+        rename = "response.output_text.delta",
+        alias = "response.refusal.delta"
+    )]
+    TextDelta { delta: String },
+    #[serde(rename = "response.reasoning_summary_part.added")]
+    SummaryPartAdded,
+    #[serde(rename = "response.reasoning_summary_text.delta")]
+    SummaryTextDelta { delta: String },
+    #[serde(rename = "response.function_call_arguments.delta")]
+    ArgumentsDelta { output_index: usize, delta: String },
+    #[serde(rename = "response.completed", alias = "response.incomplete")]
+    Completed,
+    #[serde(rename = "response.failed")]
+    Failed { response: FailedResponse },
+    #[serde(rename = "error")]
+    Error { message: String },
+    #[serde(other)]
+    Other,
 }
 
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum OutputItem {
-    Message {
-        content: Vec<OutputContent>,
-    },
+enum AddedItem {
+    Reasoning,
     FunctionCall {
         call_id: String,
         name: String,
-        arguments: String,
     },
     #[serde(other)]
     Other,
 }
 
 #[derive(Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum OutputContent {
-    OutputText {
-        text: String,
-    },
-    Refusal {
-        refusal: String,
-    },
-    #[serde(other)]
-    Other,
+struct FailedResponse {
+    error: Option<ResponseError>,
+}
+
+#[derive(Deserialize)]
+struct ResponseError {
+    message: String,
 }
 
 fn items(message: &Message) -> Vec<Item<'_>> {
@@ -143,43 +174,41 @@ impl<'a> From<&'a ToolDefinition> for FunctionTool<'a> {
     }
 }
 
-impl OutputContent {
-    fn text(self) -> Option<String> {
+impl StreamEvent {
+    fn apply(self, collector: &mut Collector<'_>) -> Result<ControlFlow<()>, LlmError> {
         match self {
-            Self::OutputText { text } => Some(text),
-            Self::Refusal { refusal } => Some(refusal),
-            Self::Other => None,
-        }
-    }
-}
-
-impl From<ResponsesResponse> for Reply {
-    fn from(response: ResponsesResponse) -> Self {
-        let mut parts = Vec::new();
-        let mut tool_calls = Vec::new();
-
-        for item in response.output {
-            match item {
-                OutputItem::Message { content } => {
-                    parts.extend(content.into_iter().filter_map(OutputContent::text));
-                },
-                OutputItem::FunctionCall {
-                    call_id,
-                    name,
-                    arguments,
-                } => tool_calls.push(ToolCall {
-                    id: call_id,
-                    kind: ToolKind::Function,
-                    function: FunctionCall { name, arguments },
-                }),
-                OutputItem::Other => {},
+            Self::ItemAdded {
+                item: AddedItem::Reasoning,
+                ..
             }
+            | Self::SummaryPartAdded => collector.start_thinking(),
+            Self::ItemAdded {
+                output_index,
+                item: AddedItem::FunctionCall { call_id, name },
+            } => collector.tool_call(output_index, call_id, name),
+            Self::ContentPartAdded => collector.start_text(),
+            Self::TextDelta { delta } => collector.text(&delta),
+            Self::SummaryTextDelta { delta } => collector.thinking(&delta),
+            Self::ArgumentsDelta {
+                output_index,
+                delta,
+            } => collector.tool_arguments(output_index, &delta),
+            Self::Completed => return Ok(ControlFlow::Break(())),
+            Self::Failed { response } => {
+                return Err(LlmError::Remote(response.error.map_or_else(
+                    || "the response failed".to_owned(),
+                    |error| error.message,
+                )));
+            },
+            Self::Error { message } => return Err(LlmError::Remote(message)),
+            Self::ItemAdded {
+                item: AddedItem::Other,
+                ..
+            }
+            | Self::Other => {},
         }
 
-        Self {
-            content: joined(parts),
-            tool_calls,
-        }
+        Ok(ControlFlow::Continue(()))
     }
 }
 
@@ -190,6 +219,7 @@ impl Provider for Responses {
         effort: Option<Effort>,
         messages: &'a [Message],
         tools: &'a [ToolDefinition],
+        progress: &'a OnProgress<'a>,
     ) -> BoxFuture<'a, Result<Reply, LlmError>> {
         Box::pin(async move {
             let request = self
@@ -197,13 +227,25 @@ impl Provider for Responses {
                 .bearer(Method::POST, "/responses")
                 .json(&ResponsesRequest {
                     model,
-                    reasoning: effort.map(|effort| Reasoning { effort }),
+                    reasoning: effort.map(|effort| Reasoning {
+                        effort,
+                        summary: Summary::Auto,
+                    }),
                     input: messages.iter().flat_map(items).collect(),
                     tools: tools.iter().map(FunctionTool::from).collect(),
                     store: false,
+                    stream: true,
                 });
-            let response: ResponsesResponse = send(request).await?.json().await?;
-            Ok(response.into())
+            let mut events = Events::new(send(request).await?);
+            let mut collector = Collector::new(progress);
+
+            while let Some(Data::Event(event)) = events.next::<StreamEvent>().await? {
+                if event.apply(&mut collector)?.is_break() {
+                    break;
+                }
+            }
+
+            Ok(collector.finish())
         })
     }
 

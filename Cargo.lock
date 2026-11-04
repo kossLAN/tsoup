@@ -2123,8 +2123,20 @@ dependencies = [
  "tokio-util",
  "tracing",
  "tracing-subscriber",
+ "tsoup-claude-code",
  "tsoup-proto",
  "uuid",
+]
+
+[[package]]
+name = "tsoup-claude-code"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]

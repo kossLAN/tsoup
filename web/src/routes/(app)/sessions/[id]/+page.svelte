@@ -4,6 +4,7 @@
 	import {
 		cancelTurn,
 		destroyVm,
+		getSettings,
 		patchSession,
 		runAction,
 		startTurn,
@@ -20,11 +21,13 @@
 	import { Session } from '$lib/session.svelte';
 	import { sessions } from '$lib/sessions.svelte';
 	import { cubicOut } from 'svelte/easing';
+	import { onMount } from 'svelte';
 	import { fly } from 'svelte/transition';
 
 	const session = $derived(new Session(page.params.id ?? ''));
 	let hidden = $state(false);
 	let failure = $state<string | null>(null);
+	let hideThinking = $state(true);
 
 	const vm = $derived(session.vm);
 	const active = $derived(vm !== null && vm.state !== 'stopped');
@@ -33,6 +36,10 @@
 	);
 	const node = $derived(session.environment?.kind === 'node' ? session.environment : null);
 	const directory = $derived(sessions.nodes.find(({ name }) => name === node?.name)?.directory);
+
+	onMount(async () => {
+		hideThinking = (await getSettings()).hide_thinking;
+	});
 
 	$effect(() => {
 		const current = session;
@@ -51,23 +58,15 @@
 	});
 
 	$effect(() => {
-		const current = session;
-		const text = sessions.pending.get(current.id);
-		if (text === undefined) return;
-		sessions.pending.delete(current.id);
-		current.ready.then(() => send(text, current.id));
-	});
-
-	$effect(() => {
 		if (vm?.state === 'building' || vm?.state === 'booting') {
 			hidden = false;
 		}
 	});
 
-	async function send(text: string, id = session.id): Promise<boolean> {
+	async function send(text: string): Promise<boolean> {
 		failure = null;
 		try {
-			await startTurn(id, text);
+			await startTurn(session.id, text);
 			return true;
 		} catch (error) {
 			failure = error instanceof Error ? error.message : String(error);
@@ -135,6 +134,8 @@
 				entries={session.entries}
 				start={session.start}
 				busy={session.busy}
+				draft={session.draft}
+				thinking={!hideThinking}
 				failure={failure ?? session.failure}
 				onolder={() => session.loadOlder()}
 			/>

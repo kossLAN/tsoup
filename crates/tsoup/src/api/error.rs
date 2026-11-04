@@ -2,6 +2,7 @@ use axum::Json;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use serde::Serialize;
+use tsoup_claude_code::ClaudeCodeError;
 
 use crate::llm::LlmError;
 use crate::session::SessionError;
@@ -91,6 +92,18 @@ impl From<WorkspaceError> for ApiError {
             WorkspaceError::Vm(error) => error.into(),
             error => Self::new(StatusCode::BAD_GATEWAY, error.to_string()),
         }
+    }
+}
+
+impl From<ClaudeCodeError> for ApiError {
+    fn from(error: ClaudeCodeError) -> Self {
+        let status = match error {
+            ClaudeCodeError::InvalidCode => StatusCode::BAD_REQUEST,
+            ClaudeCodeError::NoLogin => StatusCode::CONFLICT,
+            _ => StatusCode::BAD_GATEWAY,
+        };
+
+        Self::new(status, error.to_string())
     }
 }
 

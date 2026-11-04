@@ -1,13 +1,15 @@
 use std::io;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::RwLock;
+use tsoup_claude_code::Cli;
 use uuid::Uuid;
 
-use crate::llm::{Effort, Endpoint, Provider, ProviderKind};
+use crate::llm::{Anthropic, ChatCompletions, ClaudeCode, Effort, Endpoint, Provider, Responses};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
@@ -27,15 +29,50 @@ pub struct Settings {
     pub providers: Vec<ProviderSettings>,
     pub default_model: Option<ModelChoice>,
     pub last_effort: Option<Effort>,
+    pub hide_thinking: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProviderSettings {
     pub id: Uuid,
     pub name: String,
-    pub kind: ProviderKind,
+    #[serde(flatten)]
+    pub access: Access,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Access {
+    ChatCompletions(Api),
+    Responses(Api),
+    Anthropic(Api),
+    ClaudeCode,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Api {
     pub url: String,
     pub key: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderKind {
+    ChatCompletions,
+    Responses,
+    Anthropic,
+    ClaudeCode,
+}
+
+impl ProviderKind {
+    const fn label(self) -> &'static str {
+        match self {
+            Self::ChatCompletions => "OpenAI compatible",
+            Self::Responses => "OpenAI Responses",
+            Self::Anthropic => "Anthropic",
+            Self::ClaudeCode => "Claude Code",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,12 +102,41 @@ impl Settings {
 }
 
 impl ProviderSettings {
-    pub fn connect(&self, http: &Client) -> Box<dyn Provider> {
-        self.kind.connect(Endpoint {
+    pub fn connect(&self, http: &Client, cli: &Arc<Cli>) -> Box<dyn Provider> {
+        match &self.access {
+            Access::ChatCompletions(api) => Box::new(ChatCompletions(api.endpoint(http))),
+            Access::Responses(api) => Box::new(Responses(api.endpoint(http))),
+            Access::Anthropic(api) => Box::new(Anthropic(api.endpoint(http))),
+            Access::ClaudeCode => Box::new(ClaudeCode(Arc::clone(cli))),
+        }
+    }
+}
+
+impl Access {
+    const fn kind(&self) -> ProviderKind {
+        match self {
+            Self::ChatCompletions(_) => ProviderKind::ChatCompletions,
+            Self::Responses(_) => ProviderKind::Responses,
+            Self::Anthropic(_) => ProviderKind::Anthropic,
+            Self::ClaudeCode => ProviderKind::ClaudeCode,
+        }
+    }
+
+    const fn api(&self) -> Option<&Api> {
+        match self {
+            Self::ChatCompletions(api) | Self::Responses(api) | Self::Anthropic(api) => Some(api),
+            Self::ClaudeCode => None,
+        }
+    }
+}
+
+impl Api {
+    fn endpoint(&self, http: &Client) -> Endpoint {
+        Endpoint {
             http: http.clone(),
             url: self.url.clone(),
             key: self.key.clone(),
-        })
+        }
     }
 }
 
@@ -79,6 +145,7 @@ pub struct SettingsView {
     pub providers: Vec<ProviderView>,
     pub default_model: Option<ModelChoice>,
     pub last_effort: Option<Effort>,
+    pub hide_thinking: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -86,7 +153,7 @@ pub struct ProviderView {
     pub id: Uuid,
     pub name: String,
     pub kind: ProviderKind,
-    pub url: String,
+    pub url: Option<String>,
     pub has_key: bool,
 }
 
@@ -96,16 +163,21 @@ impl From<&Settings> for SettingsView {
             providers: settings
                 .providers
                 .iter()
-                .map(|provider| ProviderView {
-                    id: provider.id,
-                    name: provider.name.clone(),
-                    kind: provider.kind,
-                    url: provider.url.clone(),
-                    has_key: provider.key.is_some(),
+                .map(|provider| {
+                    let api = provider.access.api();
+
+                    ProviderView {
+                        id: provider.id,
+                        name: provider.name.clone(),
+                        kind: provider.access.kind(),
+                        url: api.map(|api| api.url.clone()),
+                        has_key: api.is_some_and(|api| api.key.is_some()),
+                    }
                 })
                 .collect(),
             default_model: settings.default_model.clone(),
             last_effort: settings.last_effort,
+            hide_thinking: settings.hide_thinking,
         }
     }
 }
@@ -114,6 +186,7 @@ impl From<&Settings> for SettingsView {
 pub struct SettingsPatch {
     pub providers: Option<Vec<ProviderUpdate>>,
     pub default_model: Option<ModelChoice>,
+    pub hide_thinking: Option<bool>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -121,25 +194,18 @@ pub struct ProviderUpdate {
     pub id: Option<Uuid>,
     pub name: String,
     pub kind: ProviderKind,
-    pub url: String,
+    pub url: Option<String>,
     pub key: Option<String>,
 }
 
 impl ProviderUpdate {
     fn resolve(self, saved: &Settings) -> Result<ProviderSettings, SettingsError> {
-        let url = self.url.trim().trim_end_matches('/');
-
-        if url.is_empty() {
-            return Err(SettingsError::MissingUrl);
-        }
-
         let name = self.name.trim();
-        let key = match self.key {
-            Some(key) => Some(key).filter(|key| !key.is_empty()),
-            None => self
-                .id
-                .and_then(|id| saved.provider(id))
-                .and_then(|provider| provider.key.clone()),
+        let access = match self.kind {
+            ProviderKind::ChatCompletions => Access::ChatCompletions(self.api(saved)?),
+            ProviderKind::Responses => Access::Responses(self.api(saved)?),
+            ProviderKind::Anthropic => Access::Anthropic(self.api(saved)?),
+            ProviderKind::ClaudeCode => Access::ClaudeCode,
         };
 
         Ok(ProviderSettings {
@@ -150,10 +216,30 @@ impl ProviderUpdate {
                 name
             }
             .to_owned(),
-            kind: self.kind,
+            access,
+        })
+    }
+
+    fn api(&self, saved: &Settings) -> Result<Api, SettingsError> {
+        let url = self
+            .url
+            .as_deref()
+            .map(|url| url.trim().trim_end_matches('/'))
+            .filter(|url| !url.is_empty())
+            .ok_or(SettingsError::MissingUrl)?;
+        let key = self.key.as_ref().map_or_else(
+            || self.saved_key(saved),
+            |key| Some(key.clone()).filter(|key| !key.is_empty()),
+        );
+
+        Ok(Api {
             url: url.to_owned(),
             key,
         })
+    }
+
+    fn saved_key(&self, saved: &Settings) -> Option<String> {
+        saved.provider(self.id?)?.access.api()?.key.clone()
     }
 }
 
@@ -204,6 +290,10 @@ impl SettingsStore {
         if let Some(model) = patch.default_model {
             updated.check(&model)?;
             updated.default_model = Some(model);
+        }
+
+        if let Some(hide) = patch.hide_thinking {
+            updated.hide_thinking = hide;
         }
 
         self.save(&updated).await?;

@@ -476,7 +476,6 @@ impl Session {
     pub async fn selection(&self) -> Selection {
         self.data.lock().await.selection.clone()
     }
-
     pub async fn action(&self, label: &str) -> Option<Action> {
         self.data
             .lock()

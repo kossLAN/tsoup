@@ -35,8 +35,7 @@
 		const environment: NewEnvironment =
 			connected === null ? { kind: 'sandbox' } : { kind: 'node', name: connected, folder };
 		try {
-			const session = await sessions.create(environment, selection);
-			sessions.pending.set(session.id, text);
+			const session = await sessions.create(environment, selection, text);
 			await goto(`/sessions/${session.id}`);
 			return true;
 		} catch (error) {

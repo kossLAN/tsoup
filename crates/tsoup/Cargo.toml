@@ -9,6 +9,7 @@ rust-version.workspace = true
 workspace = true
 
 [dependencies]
+tsoup-claude-code.workspace = true
 tsoup-proto.workspace = true
 
 anyhow.workspace = true

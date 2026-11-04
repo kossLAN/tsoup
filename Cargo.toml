@@ -8,6 +8,7 @@ edition = "2024"
 rust-version = "1.88"
 
 [workspace.dependencies]
+tsoup-claude-code = { path = "crates/claude-code" }
 tsoup-proto = { path = "crates/proto" }
 tsoup-workspace = { path = "crates/workspace" }
 

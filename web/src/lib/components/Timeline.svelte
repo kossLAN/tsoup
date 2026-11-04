@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Entry } from '$lib/api';
 	import { WarningCircleIcon } from '$lib/icons';
+	import type { Draft } from '$lib/session.svelte';
 	import { tick } from 'svelte';
 	import Markdown from './Markdown.svelte';
 	import Spinner from './Spinner.svelte';
@@ -11,15 +12,26 @@
 		entries,
 		start,
 		busy,
+		draft,
+		thinking,
 		failure,
 		onolder
 	}: {
 		entries: Entry[];
 		start: number;
 		busy: boolean;
+		draft: Draft | null;
+		thinking: boolean;
 		failure: string | null;
 		onolder: () => Promise<void>;
 	} = $props();
+
+	const activity = $derived.by(() => {
+		if (!draft) return null;
+		if (draft.tool) return `Preparing ${draft.tool}`;
+		if (draft.text) return 'Writing';
+		return 'Thinking';
+	});
 
 	const threshold = 400;
 
@@ -47,6 +59,8 @@
 	$effect(() => {
 		void busy;
 		void failure;
+		void draft?.text;
+		void draft?.thinking;
 		const total = start + entries.length;
 		if (total > end && entries.at(-1)?.kind === 'user') {
 			pinned = true;
@@ -97,6 +111,9 @@
 					{entry.text}
 				</div>
 			{:else if entry.kind === 'assistant'}
+				{#if thinking && entry.thinking}
+					<Markdown text={entry.thinking} muted />
+				{/if}
 				{#if entry.text}
 					<Markdown text={entry.text} />
 				{/if}
@@ -110,8 +127,15 @@
 			{/if}
 		{/each}
 
+		{#if thinking && draft?.thinking}
+			<Markdown text={draft.thinking} muted />
+		{/if}
+		{#if draft?.text}
+			<Markdown text={draft.text} />
+		{/if}
+
 		{#if busy}
-			<Working />
+			<Working label={activity} />
 		{/if}
 
 		{#if failure}

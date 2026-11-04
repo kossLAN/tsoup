@@ -1,3 +1,4 @@
+mod claude_code;
 mod error;
 mod node;
 mod proxy;
@@ -15,6 +16,7 @@ use futures_util::{Stream, StreamExt as _, stream};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast;
 use tokio_util::sync::CancellationToken;
+use tsoup_claude_code::Cli;
 use uuid::Uuid;
 
 pub use self::error::ApiError;
@@ -28,6 +30,7 @@ pub struct AppState {
     sessions: Arc<Sessions>,
     agent: Arc<Agent>,
     settings: Arc<SettingsStore>,
+    claude_code: Arc<Cli>,
     shutdown: CancellationToken,
 }
 
@@ -36,12 +39,14 @@ impl AppState {
         sessions: Sessions,
         agent: Agent,
         settings: Arc<SettingsStore>,
+        claude_code: Arc<Cli>,
         shutdown: CancellationToken,
     ) -> Self {
         Self {
             sessions: Arc::new(sessions),
             agent: Arc::new(agent),
             settings,
+            claude_code,
             shutdown,
         }
     }
@@ -49,12 +54,23 @@ impl AppState {
     async fn session(&self, id: Uuid) -> Result<Arc<Session>, ApiError> {
         Ok(self.sessions.get(id).await?)
     }
+
+    async fn begin_turn(&self, session: &Arc<Session>, text: String) -> Result<(), ApiError> {
+        let turn = Arc::clone(&self.agent).run_turn(Arc::clone(session), text);
+        Ok(session.start_turn(turn).await?)
+    }
 }
 
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/settings", get(get_settings).patch(update_settings))
         .route("/api/providers/{id}/models", get(list_models))
+        .route("/api/claude-code/account", get(claude_code::account))
+        .route("/api/claude-code/login", post(claude_code::start_login))
+        .route(
+            "/api/claude-code/login/code",
+            post(claude_code::finish_login),
+        )
         .route("/api/events", get(list_events))
         .route("/api/sessions", get(list_sessions).post(create_session))
         .route(
@@ -96,6 +112,7 @@ struct ActionRequest {
 struct NewSession {
     environment: NewEnvironment,
     selection: Option<Selection>,
+    message: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -160,6 +177,11 @@ async fn create_session(
         .create(request.environment, selection)
         .await?;
     state.settings.remember_effort(effort).await?;
+
+    if let Some(message) = request.message {
+        state.begin_turn(&session, message).await?;
+    }
+
     Ok((StatusCode::CREATED, Json(session.summary().await)))
 }
 
@@ -233,8 +255,7 @@ async fn start_turn(
     Json(request): Json<TurnRequest>,
 ) -> Result<StatusCode, ApiError> {
     let session = state.session(id).await?;
-    let turn = Arc::clone(&state.agent).run_turn(Arc::clone(&session), request.content);
-    session.start_turn(turn).await?;
+    state.begin_turn(&session, request.content).await?;
     Ok(StatusCode::ACCEPTED)
 }
 

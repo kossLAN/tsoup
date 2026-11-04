@@ -20,6 +20,7 @@ export { default as PlugsConnectedIcon } from 'phosphor-svelte/lib/PlugsConnecte
 export { default as PlusIcon } from 'phosphor-svelte/lib/PlusIcon';
 export { default as PowerIcon } from 'phosphor-svelte/lib/PowerIcon';
 export { default as SidebarSimpleIcon } from 'phosphor-svelte/lib/SidebarSimpleIcon';
+export { default as SlidersHorizontalIcon } from 'phosphor-svelte/lib/SlidersHorizontalIcon';
 export { default as SparkleIcon } from 'phosphor-svelte/lib/SparkleIcon';
 export { default as StarIcon } from 'phosphor-svelte/lib/StarIcon';
 export { default as StopIcon } from 'phosphor-svelte/lib/StopIcon';

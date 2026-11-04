@@ -31,7 +31,12 @@ export type FileDiff = {
 
 export type Entry =
 	| { kind: 'user'; text: string }
-	| { kind: 'assistant'; text: string | null; tool_calls: ToolCall[] }
+	| {
+			kind: 'assistant';
+			thinking?: string;
+			text: string | null;
+			tool_calls: ToolCall[];
+	  }
 	| { kind: 'tool'; call_id: string; output: string; error: boolean; diff: FileDiff | null };
 
 export type Preview = {
@@ -72,7 +77,13 @@ export type SessionEvent =
 	| { type: 'turn_cancelled' }
 	| { type: 'environment'; environment: EnvironmentStatus }
 	| { type: 'actions'; actions: Action[] }
-	| { type: 'selection'; selection: Selection };
+	| { type: 'selection'; selection: Selection }
+	| { type: 'progress'; progress: Progress };
+
+export type Progress =
+	| { kind: 'thinking'; text: string }
+	| { kind: 'text'; text: string }
+	| { kind: 'tool_call'; name: string };
 
 export type ListEvent =
 	| { type: 'snapshot'; sessions: SessionSummary[]; nodes: NodeSummary[] }
@@ -105,9 +116,10 @@ export async function listFolders(node: string): Promise<string[]> {
 
 export async function createSession(
 	environment: NewEnvironment,
-	selection: Selection
+	selection: Selection,
+	message: string
 ): Promise<SessionSummary> {
-	return (await request('POST', '/api/sessions', { environment, selection })).json();
+	return (await request('POST', '/api/sessions', { environment, selection, message })).json();
 }
 
 export async function patchSession(id: string, patch: { selection?: Selection }): Promise<void> {
@@ -159,13 +171,13 @@ export function previewUrl(id: string, preview: Preview): string {
 	return `${location.protocol}//${preview.name}.${id}.${origin}${preview.path}`;
 }
 
-export type ProviderKind = 'chat_completions' | 'responses' | 'anthropic';
+export type ProviderKind = 'chat_completions' | 'responses' | 'anthropic' | 'claude_code';
 
 export type Provider = {
 	id: string;
 	name: string;
 	kind: ProviderKind;
-	url: string;
+	url: string | null;
 	has_key: boolean;
 };
 
@@ -185,19 +197,21 @@ export type Settings = {
 	providers: Provider[];
 	default_model: ModelChoice | null;
 	last_effort: Effort | null;
+	hide_thinking: boolean;
 };
 
 export type ProviderUpdate = {
 	id: string | null;
 	name: string;
 	kind: ProviderKind;
-	url: string;
+	url: string | null;
 	key?: string;
 };
 
 export type SettingsPatch = {
 	providers?: ProviderUpdate[];
 	default_model?: ModelChoice;
+	hide_thinking?: boolean;
 };
 
 export async function getSettings(): Promise<Settings> {
@@ -210,4 +224,22 @@ export async function patchSettings(patch: SettingsPatch): Promise<Settings> {
 
 export async function listModels(provider: string): Promise<string[]> {
 	return (await request('GET', `/api/providers/${provider}/models`)).json();
+}
+
+export type ClaudeCodeAccount = {
+	signed_in: boolean;
+	email: string | null;
+	subscription: string | null;
+};
+
+export async function getClaudeCodeAccount(): Promise<ClaudeCodeAccount> {
+	return (await request('GET', '/api/claude-code/account')).json();
+}
+
+export async function startClaudeCodeLogin(): Promise<{ url: string }> {
+	return (await request('POST', '/api/claude-code/login')).json();
+}
+
+export async function finishClaudeCodeLogin(code: string): Promise<ClaudeCodeAccount> {
+	return (await request('POST', '/api/claude-code/login/code', { code })).json();
 }

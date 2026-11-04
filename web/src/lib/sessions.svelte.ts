@@ -17,7 +17,7 @@ class SessionList {
 	nodes = $state<NodeSummary[]>([]);
 	loaded = $state(false);
 	unseen = new SvelteSet<string>(load());
-	pending = new Map<string, string>();
+	#unconfirmed = new Set<string>();
 	#viewing: string | null = null;
 
 	connect(): () => void {
@@ -36,8 +36,13 @@ class SessionList {
 		this.#see();
 	}
 
-	async create(environment: NewEnvironment, selection: Selection): Promise<SessionSummary> {
-		const session = await createSession(environment, selection);
+	async create(
+		environment: NewEnvironment,
+		selection: Selection,
+		message: string
+	): Promise<SessionSummary> {
+		const session = await createSession(environment, selection, message);
+		this.#unconfirmed.add(session.id);
 		this.#add(session);
 		return session;
 	}
@@ -65,16 +70,23 @@ class SessionList {
 				for (const id of this.unseen) {
 					if (!ids.has(id)) this.unseen.delete(id);
 				}
+				const unconfirmed = this.items.filter(
+					(session) => this.#unconfirmed.has(session.id) && !ids.has(session.id)
+				);
+				for (const id of ids) this.#unconfirmed.delete(id);
 				this.items = event.sessions;
+				for (const session of unconfirmed) this.#add(session);
 				this.nodes = event.nodes;
 				this.loaded = true;
 				save(this.unseen);
 				break;
 			}
 			case 'created':
+				this.#unconfirmed.delete(event.session.id);
 				this.#add(event.session);
 				break;
 			case 'removed':
+				this.#unconfirmed.delete(event.id);
 				this.#forget(event.id);
 				break;
 			case 'busy': {

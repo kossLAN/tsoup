@@ -1,6 +1,8 @@
 mod anthropic;
+mod claude_code;
 mod completions;
 mod responses;
+mod stream;
 
 use std::borrow::Cow;
 
@@ -8,10 +10,12 @@ use futures_util::future::BoxFuture;
 use reqwest::{Client, Method, RequestBuilder, StatusCode};
 use schemars::Schema;
 use serde::{Deserialize, Serialize};
+use tsoup_claude_code::ClaudeCodeError;
 
-use self::anthropic::Anthropic;
-use self::completions::ChatCompletions;
-use self::responses::Responses;
+pub use self::anthropic::Anthropic;
+pub use self::claude_code::ClaudeCode;
+pub use self::completions::ChatCompletions;
+pub use self::responses::Responses;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LlmError {
@@ -23,6 +27,14 @@ pub enum LlmError {
     NoChoices,
     #[error("the model declined to respond")]
     Refused,
+    #[error("the model API streamed a malformed event: {0}")]
+    Malformed(serde_json::Error),
+    #[error("the model API streamed invalid UTF-8")]
+    Encoding,
+    #[error("the model API reported an error: {0}")]
+    Remote(String),
+    #[error(transparent)]
+    ClaudeCode(#[from] ClaudeCodeError),
 }
 
 #[derive(Debug, Clone)]
@@ -74,6 +86,7 @@ pub struct ToolDefinition {
 #[derive(Debug)]
 pub struct Reply {
     pub content: Option<String>,
+    pub thinking: Option<String>,
     pub tool_calls: Vec<ToolCall>,
 }
 
@@ -86,6 +99,27 @@ pub enum Effort {
     Xhigh,
 }
 
+impl Effort {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Low => "low",
+            Self::Medium => "medium",
+            Self::High => "high",
+            Self::Xhigh => "xhigh",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Progress {
+    Thinking { text: String },
+    Text { text: String },
+    ToolCall { name: String },
+}
+
+pub type OnProgress<'a> = dyn Fn(Progress) + Send + Sync + 'a;
+
 pub trait Provider: Send + Sync {
     fn complete<'a>(
         &'a self,
@@ -93,35 +127,10 @@ pub trait Provider: Send + Sync {
         effort: Option<Effort>,
         messages: &'a [Message],
         tools: &'a [ToolDefinition],
+        progress: &'a OnProgress<'a>,
     ) -> BoxFuture<'a, Result<Reply, LlmError>>;
 
     fn models(&self) -> BoxFuture<'_, Result<Vec<String>, LlmError>>;
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProviderKind {
-    ChatCompletions,
-    Responses,
-    Anthropic,
-}
-
-impl ProviderKind {
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::ChatCompletions => "OpenAI compatible",
-            Self::Responses => "OpenAI Responses",
-            Self::Anthropic => "Anthropic",
-        }
-    }
-
-    pub fn connect(self, endpoint: Endpoint) -> Box<dyn Provider> {
-        match self {
-            Self::ChatCompletions => Box::new(ChatCompletions(endpoint)),
-            Self::Responses => Box::new(Responses(endpoint)),
-            Self::Anthropic => Box::new(Anthropic(endpoint)),
-        }
-    }
 }
 
 pub struct Endpoint {
@@ -172,6 +181,13 @@ async fn send(request: RequestBuilder) -> Result<reqwest::Response, LlmError> {
     Ok(response)
 }
 
-fn joined(parts: Vec<String>) -> Option<String> {
-    Some(parts.join("\n\n")).filter(|content| !content.is_empty())
+fn system(messages: &[Message]) -> String {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            Message::System { content } => Some(content.as_str()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("\n\n")
 }

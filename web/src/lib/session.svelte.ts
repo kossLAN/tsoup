@@ -4,16 +4,24 @@ import {
 	type Action,
 	type Entry,
 	type EnvironmentStatus,
+	type Progress,
 	type Selection,
 	type SessionEvent
 } from './api';
 import { sessions } from './sessions.svelte';
+
+export type Draft = {
+	thinking: string;
+	text: string;
+	tool: string | null;
+};
 
 export class Session {
 	title = $state('');
 	entries = $state<Entry[]>([]);
 	actions = $state<Action[]>([]);
 	selection = $state<Selection>({ model: null, effort: null });
+	draft = $state<Draft | null>(null);
 	start = $state(0);
 	environment = $state<EnvironmentStatus | null>(null);
 	busy = $state(false);
@@ -24,8 +32,6 @@ export class Session {
 
 	readonly id: string;
 	#events: EventSource;
-	#ready = Promise.withResolvers<void>();
-	readonly ready = this.#ready.promise;
 
 	constructor(id: string) {
 		this.id = id;
@@ -61,11 +67,12 @@ export class Session {
 				this.actions = event.actions;
 				this.selection = event.selection;
 				this.busy = event.busy;
+				this.draft = null;
 				this.#setEnvironment(event.environment);
-				this.#ready.resolve();
 				break;
 			}
 			case 'entry':
+				if (event.entry.kind === 'assistant') this.draft = null;
 				this.entries.push(event.entry);
 				if (!this.title && event.entry.kind === 'user') {
 					this.title = titleOf(event.entry.text);
@@ -79,10 +86,15 @@ export class Session {
 			case 'turn_finished':
 			case 'turn_cancelled':
 				this.busy = false;
+				this.draft = null;
 				break;
 			case 'turn_failed':
 				this.busy = false;
+				this.draft = null;
 				this.failure = event.message;
+				break;
+			case 'progress':
+				this.#progress(event.progress);
 				break;
 			case 'actions':
 				this.actions = event.actions;
@@ -94,6 +106,13 @@ export class Session {
 				this.#setEnvironment(event.environment);
 				break;
 		}
+	}
+
+	#progress(progress: Progress) {
+		this.draft ??= { thinking: '', text: '', tool: null };
+		if (progress.kind === 'thinking') this.draft.thinking += progress.text;
+		else if (progress.kind === 'text') this.draft.text += progress.text;
+		else this.draft.tool = progress.name;
 	}
 
 	#setEnvironment(environment: EnvironmentStatus) {

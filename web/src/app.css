@@ -164,6 +164,14 @@
 	--tw-prose-invert-th-borders: var(--color-light);
 	--tw-prose-invert-td-borders: var(--color-light);
 
+	&.muted {
+		--tw-prose-invert-body: var(--color-secondary);
+		--tw-prose-invert-headings: var(--color-secondary);
+		--tw-prose-invert-bold: var(--color-secondary);
+		--tw-prose-invert-code: var(--color-secondary);
+		--tw-prose-invert-pre-code: var(--color-secondary);
+	}
+
 	& :where(h1, h2, h3, h4) {
 		@apply font-semibold;
 	}

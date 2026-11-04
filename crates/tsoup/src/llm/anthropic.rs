@@ -1,16 +1,19 @@
+use std::ops::ControlFlow;
+
 use futures_util::future::BoxFuture;
 use reqwest::{Method, RequestBuilder};
 use schemars::Schema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
+use super::stream::{Collector, Data, Events};
 use super::{
-    Effort, Endpoint, FunctionCall, LlmError, Message, Provider, Reply, ToolCall, ToolDefinition,
-    ToolKind, joined, list_models, send,
+    Effort, Endpoint, LlmError, Message, OnProgress, Provider, Reply, ToolCall, ToolDefinition,
+    list_models, send, system,
 };
 
 const VERSION: &str = "2026-10-21";
-const MAX_TOKENS: u32 = 16_000;
+const MAX_TOKENS: u32 = 64_000;
 
 pub struct Anthropic(pub Endpoint);
 
@@ -34,11 +37,26 @@ struct MessagesRequest<'a> {
     model: &'a str,
     max_tokens: u32,
     #[serde(skip_serializing_if = "Option::is_none")]
+    thinking: Option<Thinking>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     output_config: Option<OutputConfig>,
     #[serde(skip_serializing_if = "String::is_empty")]
     system: String,
     messages: Vec<Turn<'a>>,
     tools: Vec<Tool<'a>>,
+    stream: bool,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename = "adaptive")]
+struct Thinking {
+    display: Display,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "lowercase")]
+enum Display {
+    Summarized,
 }
 
 #[derive(Serialize)]
@@ -84,43 +102,72 @@ struct Tool<'a> {
 }
 
 #[derive(Deserialize)]
-struct MessagesResponse {
-    content: Vec<ContentBlock>,
-    stop_reason: Option<StopReason>,
-}
-
-#[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
-enum ContentBlock {
-    Text {
-        text: String,
+pub(super) enum StreamEvent {
+    ContentBlockStart {
+        index: usize,
+        content_block: StartedBlock,
     },
-    ToolUse {
-        id: String,
-        name: String,
-        input: Value,
+    ContentBlockDelta {
+        index: usize,
+        delta: BlockDelta,
+    },
+    MessageDelta {
+        delta: MessageDelta,
+    },
+    MessageStop,
+    Error {
+        error: StreamError,
     },
     #[serde(other)]
     Other,
 }
 
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(super) enum StartedBlock {
+    Text,
+    Thinking,
+    ToolUse {
+        id: String,
+        name: String,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub(super) enum BlockDelta {
+    TextDelta {
+        text: String,
+    },
+    ThinkingDelta {
+        thinking: String,
+    },
+    InputJsonDelta {
+        partial_json: String,
+    },
+    #[serde(other)]
+    Other,
+}
+
+#[derive(Deserialize)]
+pub(super) struct MessageDelta {
+    stop_reason: Option<StopReason>,
+}
+
 #[derive(PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
-enum StopReason {
+pub(super) enum StopReason {
     Refusal,
     #[serde(other)]
     Other,
 }
 
-fn system(messages: &[Message]) -> String {
-    messages
-        .iter()
-        .filter_map(|message| match message {
-            Message::System { content } => Some(content.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>()
-        .join("\n\n")
+#[derive(Deserialize)]
+pub(super) struct StreamError {
+    message: String,
 }
 
 fn turns(messages: &[Message]) -> Vec<Turn<'_>> {
@@ -191,36 +238,42 @@ impl<'a> From<&'a ToolDefinition> for Tool<'a> {
     }
 }
 
-impl TryFrom<MessagesResponse> for Reply {
-    type Error = LlmError;
-
-    fn try_from(response: MessagesResponse) -> Result<Self, Self::Error> {
-        if response.stop_reason == Some(StopReason::Refusal) {
-            return Err(LlmError::Refused);
+impl StreamEvent {
+    pub(super) fn apply<F>(
+        self,
+        collector: &mut Collector<'_>,
+        rename: F,
+    ) -> Result<ControlFlow<()>, LlmError>
+    where
+        F: FnOnce(String) -> String,
+    {
+        match self {
+            Self::ContentBlockStart {
+                index,
+                content_block,
+            } => match content_block {
+                StartedBlock::Text => collector.start_text(),
+                StartedBlock::Thinking => collector.start_thinking(),
+                StartedBlock::ToolUse { id, name } => collector.tool_call(index, id, rename(name)),
+                StartedBlock::Other => {},
+            },
+            Self::ContentBlockDelta { index, delta } => match delta {
+                BlockDelta::TextDelta { text } => collector.text(&text),
+                BlockDelta::ThinkingDelta { thinking } => collector.thinking(&thinking),
+                BlockDelta::InputJsonDelta { partial_json } => {
+                    collector.tool_arguments(index, &partial_json);
+                },
+                BlockDelta::Other => {},
+            },
+            Self::MessageDelta { delta } if delta.stop_reason == Some(StopReason::Refusal) => {
+                return Err(LlmError::Refused);
+            },
+            Self::MessageStop => return Ok(ControlFlow::Break(())),
+            Self::Error { error } => return Err(LlmError::Remote(error.message)),
+            Self::MessageDelta { .. } | Self::Other => {},
         }
 
-        let mut parts = Vec::new();
-        let mut tool_calls = Vec::new();
-
-        for block in response.content {
-            match block {
-                ContentBlock::Text { text } => parts.push(text),
-                ContentBlock::ToolUse { id, name, input } => tool_calls.push(ToolCall {
-                    id,
-                    kind: ToolKind::Function,
-                    function: FunctionCall {
-                        name,
-                        arguments: input.to_string(),
-                    },
-                }),
-                ContentBlock::Other => {},
-            }
-        }
-
-        Ok(Self {
-            content: joined(parts),
-            tool_calls,
-        })
+        Ok(ControlFlow::Continue(()))
     }
 }
 
@@ -231,6 +284,7 @@ impl Provider for Anthropic {
         effort: Option<Effort>,
         messages: &'a [Message],
         tools: &'a [ToolDefinition],
+        progress: &'a OnProgress<'a>,
     ) -> BoxFuture<'a, Result<Reply, LlmError>> {
         Box::pin(async move {
             let request = self
@@ -238,13 +292,25 @@ impl Provider for Anthropic {
                 .json(&MessagesRequest {
                     model,
                     max_tokens: MAX_TOKENS,
+                    thinking: effort.map(|_| Thinking {
+                        display: Display::Summarized,
+                    }),
                     output_config: effort.map(|effort| OutputConfig { effort }),
                     system: system(messages),
                     messages: turns(messages),
                     tools: tools.iter().map(Tool::from).collect(),
+                    stream: true,
                 });
-            let response: MessagesResponse = send(request).await?.json().await?;
-            response.try_into()
+            let mut events = Events::new(send(request).await?);
+            let mut collector = Collector::new(progress);
+
+            while let Some(Data::Event(event)) = events.next::<StreamEvent>().await? {
+                if event.apply(&mut collector, |name| name)?.is_break() {
+                    break;
+                }
+            }
+
+            Ok(collector.finish())
         })
     }
 

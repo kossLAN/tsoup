@@ -1,0 +1,16 @@
+[package]
+name = "tsoup-claude-code"
+description = "Drives the Claude Code CLI over its stream-json host protocol: generations, models and sign-in"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true

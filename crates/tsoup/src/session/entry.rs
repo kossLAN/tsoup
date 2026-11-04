@@ -2,7 +2,7 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use super::EnvironmentStatus;
-use crate::llm::ToolCall;
+use crate::llm::{Progress, ToolCall};
 use crate::settings::Selection;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -12,6 +12,8 @@ pub enum Entry {
         text: String,
     },
     Assistant {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        thinking: Option<String>,
         text: Option<String>,
         tool_calls: Vec<ToolCall>,
     },
@@ -74,6 +76,9 @@ pub enum Event {
     },
     Selection {
         selection: Selection,
+    },
+    Progress {
+        progress: Progress,
     },
 }
 

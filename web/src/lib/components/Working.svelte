@@ -3,6 +3,8 @@
 	import { fade } from 'svelte/transition';
 	import Spinner from './Spinner.svelte';
 
+	let { label = null }: { label?: string | null } = $props();
+
 	let verb = $state(pick(verbs));
 
 	$effect(() => {
@@ -13,7 +15,7 @@
 
 <div class="flex items-center gap-2 text-secondary">
 	<Spinner size={14} />
-	{#key verb}
-		<span in:fade={{ duration: 300 }}>{verb}…</span>
+	{#key label ?? verb}
+		<span in:fade={{ duration: 300 }}>{label ?? verb}…</span>
 	{/key}
 </div>

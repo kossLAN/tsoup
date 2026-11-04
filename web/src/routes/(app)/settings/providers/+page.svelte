@@ -1,18 +1,29 @@
 <script lang="ts">
 	import {
+		getClaudeCodeAccount,
 		getSettings,
 		patchSettings,
+		type ClaudeCodeAccount,
 		type Provider,
 		type ProviderKind,
 		type ProviderUpdate,
 		type Settings
 	} from '$lib/api';
+	import ClaudeCodeLogin from '$lib/components/ClaudeCodeLogin.svelte';
 	import Menu from '$lib/components/Menu.svelte';
 	import MenuItem from '$lib/components/MenuItem.svelte';
 	import ProviderIcon from '$lib/components/ProviderIcon.svelte';
 	import Submenu from '$lib/components/Submenu.svelte';
 	import { CaretRightIcon, PlugsConnectedIcon, PlusIcon, XIcon } from '$lib/icons';
-	import { brand, catalog, kinds, order, type Brand } from '$lib/providers';
+	import {
+		brand,
+		catalog,
+		examples,
+		labels,
+		order,
+		type ApiKind,
+		type Brand
+	} from '$lib/providers';
 	import { onMount, tick } from 'svelte';
 
 	type Draft = {
@@ -20,12 +31,14 @@
 		brand: Brand | undefined;
 		name: string;
 		kind: ProviderKind;
-		url: string;
+		url: string | null;
 		key: string;
 		hasKey: boolean;
 	};
 
 	let settings = $state<Settings | null>(null);
+	let account = $state<ClaudeCodeAccount | null>(null);
+	let accountFailure = $state<string | null>(null);
 	let draft = $state<Draft | null>(null);
 	let status = $state<string | null>(null);
 	let saving = $state(false);
@@ -35,11 +48,30 @@
 
 	onMount(async () => {
 		settings = await getSettings();
+		if (settings.providers.some((provider) => provider.kind === 'claude_code')) {
+			await loadAccount();
+		}
 	});
+
+	async function loadAccount() {
+		accountFailure = null;
+		try {
+			account = await getClaudeCodeAccount();
+		} catch (error) {
+			accountFailure = error instanceof Error ? error.message : String(error);
+		}
+	}
+
+	function signIn(): string {
+		if (accountFailure) return 'Could not check the Claude Code sign-in';
+		if (!account) return 'Checking the Claude Code sign-in';
+		return account.signed_in ? `Signed in as ${account.email}` : 'Not signed in to Claude Code';
+	}
 
 	async function open(next: Draft) {
 		draft = next;
 		status = null;
+		if (next.kind === 'claude_code' && !account) loadAccount();
 		await tick();
 		dialog?.showModal();
 		(next.brand ? keyInput : urlInput)?.focus();
@@ -69,7 +101,7 @@
 		});
 	}
 
-	function addCustom(kind: ProviderKind) {
+	function addCustom(kind: ApiKind) {
 		open({ id: null, brand: undefined, name: '', kind, url: '', key: '', hasKey: false });
 	}
 
@@ -163,7 +195,7 @@
 						Custom endpoint
 					{/snippet}
 					{#each order as kind (kind)}
-						<MenuItem onselect={() => addCustom(kind)}>{kinds[kind].label}</MenuItem>
+						<MenuItem onselect={() => addCustom(kind)}>{labels[kind]}</MenuItem>
 					{/each}
 				</Submenu>
 			</Menu>
@@ -187,10 +219,10 @@
 								>{provider.name}</span
 							>
 							<span class="block truncate text-label text-secondary"
-								>{provider.url}</span
+								>{provider.url ?? signIn()}</span
 							>
 						</span>
-						{#if !provider.has_key}
+						{#if provider.kind !== 'claude_code' && !provider.has_key}
 							<span class="shrink-0 text-label text-secondary">No API key</span>
 						{/if}
 						<span class="inline-flex shrink-0 text-secondary"
@@ -200,7 +232,7 @@
 				{/each}
 			</div>
 		{:else}
-			<div class="grid grid-cols-3 gap-2">
+			<div class="grid grid-cols-2 gap-2">
 				{#each catalog as entry (entry.label)}
 					<button
 						type="button"
@@ -215,7 +247,7 @@
 						<span class="min-w-0">
 							<span class="block truncate text-title font-medium">{entry.label}</span>
 							<span class="block truncate text-label text-secondary"
-								>{kinds[entry.kind].label}</span
+								>{labels[entry.kind]}</span
 							>
 						</span>
 					</button>
@@ -240,10 +272,10 @@
 				</span>
 				<div class="min-w-0 flex-1">
 					<div class="truncate text-title font-medium">
-						{draft.brand?.label ?? `Custom ${kinds[draft.kind].label} endpoint`}
+						{draft.brand?.label ?? `Custom ${labels[draft.kind]} endpoint`}
 					</div>
 					<div class="truncate text-label text-secondary">
-						{draft.brand ? draft.brand.url : kinds[draft.kind].label}
+						{draft.brand?.url ?? labels[draft.kind]}
 					</div>
 				</div>
 				<button
@@ -261,43 +293,47 @@
 					<input
 						class="input"
 						bind:value={draft.name}
-						placeholder={draft.brand?.label ?? kinds[draft.kind].label}
+						placeholder={draft.brand?.label ?? labels[draft.kind]}
 						spellcheck="false"
 					/>
 				</label>
-				{#if !draft.brand}
+				{#if !draft.brand && draft.kind !== 'claude_code'}
 					<label class="field">
 						<span class="w-20 shrink-0 text-secondary">Endpoint</span>
 						<input
 							bind:this={urlInput}
 							class="input"
 							bind:value={draft.url}
-							placeholder={kinds[draft.kind].url}
+							placeholder={examples[draft.kind]}
 							spellcheck="false"
 						/>
 					</label>
 				{/if}
-				<label class="field">
-					<span class="w-20 shrink-0 text-secondary">API key</span>
-					<input
-						bind:this={keyInput}
-						class="input"
-						bind:value={draft.key}
-						type="password"
-						autocomplete="off"
-						placeholder={draft.hasKey ? 'Saved, leave empty to keep it' : 'Not set'}
-					/>
-					{#if draft.hasKey}
-						<button
-							type="button"
-							class="button enabled:hover:bg-window-text/8"
-							disabled={saving}
-							onclick={clearKey}
-						>
-							Clear
-						</button>
-					{/if}
-				</label>
+				{#if draft.kind !== 'claude_code'}
+					<label class="field">
+						<span class="w-20 shrink-0 text-secondary">API key</span>
+						<input
+							bind:this={keyInput}
+							class="input"
+							bind:value={draft.key}
+							type="password"
+							autocomplete="off"
+							placeholder={draft.hasKey ? 'Saved, leave empty to keep it' : 'Not set'}
+						/>
+						{#if draft.hasKey}
+							<button
+								type="button"
+								class="button enabled:hover:bg-window-text/8"
+								disabled={saving}
+								onclick={clearKey}
+							>
+								Clear
+							</button>
+						{/if}
+					</label>
+				{:else}
+					<ClaudeCodeLogin bind:account />
+				{/if}
 			</div>
 			<div class="flex items-center gap-2 border-t border-light px-4 py-3">
 				{#if draft.id}
@@ -323,7 +359,7 @@
 				<button
 					type="submit"
 					class="button bg-window-text font-medium text-window enabled:hover:bg-window-text/90"
-					disabled={saving || !draft.url.trim()}
+					disabled={saving || draft.url?.trim() === ''}
 				>
 					{draft.id ? 'Save' : 'Add'}
 				</button>

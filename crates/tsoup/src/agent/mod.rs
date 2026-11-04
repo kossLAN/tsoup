@@ -4,6 +4,7 @@ use std::sync::Arc;
 
 use reqwest::Client;
 use tokio::sync::OnceCell;
+use tsoup_claude_code::Cli;
 
 use self::tools::Tools;
 use crate::llm::{LlmError, Message};
@@ -42,15 +43,17 @@ enum TurnError {
 
 pub struct Agent {
     http: Client,
+    cli: Arc<Cli>,
     settings: Arc<SettingsStore>,
     tools: Tools,
     modules: OnceCell<String>,
 }
 
 impl Agent {
-    pub fn new(settings: Arc<SettingsStore>) -> Self {
+    pub fn new(settings: Arc<SettingsStore>, cli: Arc<Cli>) -> Self {
         Self {
             http: Client::default(),
+            cli,
             settings,
             tools: Tools::new(),
             modules: OnceCell::new(),
@@ -58,7 +61,7 @@ impl Agent {
     }
 
     pub async fn models(&self, provider: &ProviderSettings) -> Result<Vec<String>, LlmError> {
-        provider.connect(&self.http).models().await
+        provider.connect(&self.http, &self.cli).models().await
     }
 
     pub async fn run_turn(self: Arc<Self>, session: Arc<Session>, text: String) {
@@ -85,7 +88,7 @@ impl Agent {
         let llm = settings
             .provider(model.provider)
             .ok_or(TurnError::MissingProvider)?
-            .connect(&self.http);
+            .connect(&self.http, &self.cli);
 
         session.push(Entry::User { text }).await?;
         let system = self.system_prompt(&session.environment).await;
@@ -93,12 +96,14 @@ impl Agent {
         loop {
             let messages = conversation(&system, &session.entries().await);
             let tools = self.tools.definitions(session).await;
+            let report = |progress| session.emit(Event::Progress { progress });
             let reply = llm
-                .complete(&model.name, selection.effort, &messages, &tools)
+                .complete(&model.name, selection.effort, &messages, &tools, &report)
                 .await?;
             let calls = reply.tool_calls.clone();
             session
                 .push(Entry::Assistant {
+                    thinking: reply.thinking,
                     text: reply.content,
                     tool_calls: reply.tool_calls,
                 })
@@ -177,7 +182,9 @@ fn conversation(system: &str, entries: &[Entry]) -> Vec<Message> {
                     content: text.clone(),
                 });
             },
-            Entry::Assistant { text, tool_calls } => {
+            Entry::Assistant {
+                text, tool_calls, ..
+            } => {
                 interrupt(&mut messages, &mut unanswered);
                 unanswered.extend(tool_calls.iter().map(|call| call.id.clone()));
                 messages.push(Message::Assistant {

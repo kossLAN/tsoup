@@ -2,9 +2,10 @@ use futures_util::future::BoxFuture;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
+use super::stream::{Collector, Data, Events};
 use super::{
-    Effort, Endpoint, LlmError, Message, Provider, Reply, ToolCall, ToolDefinition, ToolKind,
-    list_models, send,
+    Effort, Endpoint, LlmError, Message, OnProgress, Provider, Reply, ToolCall, ToolDefinition,
+    ToolKind, list_models, send,
 };
 
 pub struct ChatCompletions(pub Endpoint);
@@ -16,6 +17,7 @@ struct ChatRequest<'a> {
     reasoning_effort: Option<Effort>,
     messages: Vec<ChatMessage<'a>>,
     tools: Vec<ChatTool<'a>>,
+    stream: bool,
 }
 
 #[derive(Serialize)]
@@ -69,19 +71,71 @@ struct ChatTool<'a> {
 }
 
 #[derive(Deserialize)]
-struct ChatResponse {
-    choices: Vec<Choice>,
+struct Chunk {
+    #[serde(default)]
+    choices: Vec<ChunkChoice>,
+    error: Option<ChunkError>,
 }
 
 #[derive(Deserialize)]
-struct Choice {
-    message: ChoiceMessage,
+struct ChunkChoice {
+    delta: ChunkDelta,
 }
 
 #[derive(Deserialize)]
-struct ChoiceMessage {
+struct ChunkDelta {
     content: Option<String>,
-    tool_calls: Option<Vec<ToolCall>>,
+    reasoning_content: Option<String>,
+    reasoning: Option<String>,
+    tool_calls: Option<Vec<ChunkToolCall>>,
+}
+
+#[derive(Deserialize)]
+struct ChunkToolCall {
+    index: usize,
+    id: Option<String>,
+    function: Option<ChunkFunction>,
+}
+
+#[derive(Deserialize)]
+struct ChunkFunction {
+    name: Option<String>,
+    arguments: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct ChunkError {
+    message: String,
+}
+
+impl ChunkDelta {
+    fn apply(self, collector: &mut Collector<'_>) {
+        for thinking in [self.reasoning_content, self.reasoning]
+            .into_iter()
+            .flatten()
+        {
+            collector.thinking(&thinking);
+        }
+
+        if let Some(content) = self.content {
+            collector.text(&content);
+        }
+
+        for call in self.tool_calls.into_iter().flatten() {
+            let (name, arguments) = call
+                .function
+                .map(|function| (function.name, function.arguments))
+                .unwrap_or_default();
+
+            if let (Some(id), Some(name)) = (call.id, name) {
+                collector.tool_call(call.index, id, name);
+            }
+
+            if let Some(arguments) = arguments {
+                collector.tool_arguments(call.index, &arguments);
+            }
+        }
+    }
 }
 
 impl Provider for ChatCompletions {
@@ -91,6 +145,7 @@ impl Provider for ChatCompletions {
         effort: Option<Effort>,
         messages: &'a [Message],
         tools: &'a [ToolDefinition],
+        progress: &'a OnProgress<'a>,
     ) -> BoxFuture<'a, Result<Reply, LlmError>> {
         Box::pin(async move {
             let request = self
@@ -107,18 +162,28 @@ impl Provider for ChatCompletions {
                             function,
                         })
                         .collect(),
+                    stream: true,
                 });
-            let response: ChatResponse = send(request).await?.json().await?;
-            let choice = response
-                .choices
-                .into_iter()
-                .next()
-                .ok_or(LlmError::NoChoices)?;
+            let mut events = Events::new(send(request).await?);
+            let mut collector = Collector::new(progress);
+            let mut answered = false;
 
-            Ok(Reply {
-                content: choice.message.content.filter(|content| !content.is_empty()),
-                tool_calls: choice.message.tool_calls.unwrap_or_default(),
-            })
+            while let Some(Data::Event(chunk)) = events.next::<Chunk>().await? {
+                if let Some(error) = chunk.error {
+                    return Err(LlmError::Remote(error.message));
+                }
+
+                for choice in chunk.choices {
+                    answered = true;
+                    choice.delta.apply(&mut collector);
+                }
+            }
+
+            if !answered {
+                return Err(LlmError::NoChoices);
+            }
+
+            Ok(collector.finish())
         })
     }
 

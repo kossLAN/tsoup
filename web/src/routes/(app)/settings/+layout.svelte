@@ -1,10 +1,11 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { PlugsConnectedIcon } from '$lib/icons';
+	import { PlugsConnectedIcon, SlidersHorizontalIcon } from '$lib/icons';
 
 	let { children } = $props();
 
 	const sections = [
+		{ href: '/settings/general', label: 'General', icon: SlidersHorizontalIcon },
 		{ href: '/settings/providers', label: 'Providers', icon: PlugsConnectedIcon }
 	];
 </script>

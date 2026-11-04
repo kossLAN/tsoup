@@ -58,6 +58,14 @@ struct Cli {
         help = "Where VM sockets live, defaults to $XDG_RUNTIME_DIR/tsoup"
     )]
     runtime_dir: Option<PathBuf>,
+
+    #[arg(
+        long,
+        env = "TSOUP_CLAUDE_CODE",
+        default_value = "claude",
+        help = "The Claude Code CLI that Claude Code providers run"
+    )]
+    claude_code: PathBuf,
 }
 
 #[tokio::main]
@@ -91,6 +99,12 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         .or_else(|| env::var_os("XDG_RUNTIME_DIR").map(|dir| PathBuf::from(dir).join("tsoup")))
         .context("set --runtime-dir or XDG_RUNTIME_DIR")?;
 
+    let claude_code_dir = cli.data_dir.join("claude-code");
+    tokio::fs::create_dir_all(&claude_code_dir)
+        .await
+        .with_context(|| format!("creating {}", claude_code_dir.display()))?;
+    let claude_code_dir = tokio::fs::canonicalize(&claude_code_dir).await?;
+
     let settings = Arc::new(
         SettingsStore::load(cli.data_dir.join("settings.json"))
             .await
@@ -100,9 +114,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let sessions = Sessions::load(sessions_dir, runtime_dir, builder)
         .await
         .context("loading sessions")?;
-    let agent = Agent::new(Arc::clone(&settings));
+    let claude_code = Arc::new(tsoup_claude_code::Cli::new(
+        cli.claude_code,
+        claude_code_dir,
+    ));
+    let agent = Agent::new(Arc::clone(&settings), Arc::clone(&claude_code));
     let shutdown = CancellationToken::new();
-    let state = AppState::new(sessions, agent, settings, shutdown.clone());
+    let state = AppState::new(sessions, agent, settings, claude_code, shutdown.clone());
 
     let listener = TcpListener::bind(cli.listen)
         .await
