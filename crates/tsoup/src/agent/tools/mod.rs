@@ -9,6 +9,9 @@ mod set_actions;
 mod shell;
 mod show_preview;
 mod spawn_agent;
+mod web;
+mod web_fetch;
+mod web_search;
 mod write_file;
 
 use futures_util::future::BoxFuture;
@@ -16,7 +19,7 @@ use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
 use serde::de::DeserializeOwned;
 use similar::TextDiff;
-use tsoup_proto::McpFailure;
+use tsoup_proto::{MAX_OUTPUT, McpFailure};
 use uuid::Uuid;
 
 use self::ask::Ask;
@@ -29,6 +32,8 @@ use self::set_actions::SetActions;
 use self::shell::Shell;
 use self::show_preview::ShowPreview;
 use self::spawn_agent::SpawnAgent;
+use self::web_fetch::WebFetch;
+use self::web_search::WebSearch;
 use self::write_file::WriteFile;
 use super::Agent;
 use crate::llm::{FunctionCall, ToolCall, ToolDefinition};
@@ -59,6 +64,16 @@ pub enum ToolError {
     DuplicateAction(String),
     #[error("{0} is not one of the models listed for spawn_agent")]
     UnknownModel(String),
+    #[error("requesting the page: {0}")]
+    Http(#[from] reqwest::Error),
+    #[error("{0} is not an http or https address")]
+    Url(String),
+    #[error("the address is not on the public internet")]
+    Private,
+    #[error("the page is {0}, not text")]
+    NotText(String),
+    #[error("the search returned no results")]
+    NoResults,
     #[error(transparent)]
     Session(#[from] SessionError),
 }
@@ -102,6 +117,19 @@ impl Outcome {
             diff: None,
         }
     }
+}
+
+fn head(mut content: String) -> String {
+    if content.len() > MAX_OUTPUT {
+        let end = (0..=MAX_OUTPUT)
+            .rev()
+            .find(|&index| content.is_char_boundary(index))
+            .unwrap_or(0);
+        content.truncate(end);
+        content.push_str("\n[truncated]");
+    }
+
+    content
 }
 
 fn booted(failures: &[McpFailure]) -> Outcome {
@@ -259,6 +287,8 @@ pub struct Tools {
 
 impl Tools {
     pub fn new() -> Self {
+        let http = web::client();
+
         Self {
             sandbox: Toolbox::new(vec![
                 Box::new(CreateVm),
@@ -272,6 +302,8 @@ impl Tools {
                 Box::new(EditFile),
                 Box::new(SpawnAgent),
                 Box::new(Ask),
+                Box::new(WebSearch(http.clone())),
+                Box::new(WebFetch(http.clone())),
             ]),
             node: Toolbox::new(vec![
                 Box::new(Shell),
@@ -280,6 +312,8 @@ impl Tools {
                 Box::new(EditFile),
                 Box::new(SpawnAgent),
                 Box::new(Ask),
+                Box::new(WebSearch(http.clone())),
+                Box::new(WebFetch(http)),
             ]),
         }
     }

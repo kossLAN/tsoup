@@ -26,6 +26,8 @@
 		destroy_vm: ['destroying the vm', 'destroyed the vm'],
 		show_preview: ['showing a preview', 'showed a preview'],
 		set_actions: ['setting actions', 'set actions'],
+		web_search: ['searching', 'searched'],
+		web_fetch: ['fetching', 'fetched'],
 		spawn_agent: ['running agent', 'ran agent'],
 		ask: ['asking', 'asked']
 	};
@@ -53,6 +55,7 @@
 		if (typeof args.command === 'string') return args.command;
 		if (typeof args.path === 'string') return args.path;
 		if (typeof args.url === 'string') return args.url;
+		if (typeof args.query === 'string') return args.query;
 		if (typeof args.port === 'number') return `port ${args.port}`;
 		if (typeof args.name === 'string') return args.name;
 		if (typeof args.question === 'string') return args.question;
