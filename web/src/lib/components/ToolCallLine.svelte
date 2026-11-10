@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { Entry, ToolCall } from '$lib/api';
 	import { CaretRightIcon, WarningCircleIcon } from '$lib/icons';
+	import type { ClassValue } from 'svelte/elements';
 	import Diff from './Diff.svelte';
 	import Spinner from './Spinner.svelte';
 
@@ -73,12 +74,11 @@
 	});
 </script>
 
-{#snippet output(text: string, error = false)}
+{#snippet block(text: string, style: ClassValue)}
 	<pre
 		class={[
-			'max-h-90 overflow-y-auto rounded-control surface px-3 py-2 text-label/normal',
-			'wrap-break-word whitespace-pre-wrap',
-			error ? 'text-danger' : 'text-secondary'
+			'overflow-y-auto text-label/normal wrap-break-word whitespace-pre-wrap',
+			style
 		]}>{text}</pre>
 {/snippet}
 
@@ -111,15 +111,23 @@
 			<div class="max-h-105 overflow-y-auto rounded-control surface">
 				<Diff diff={result.diff} />
 			</div>
-		{:else}
-			{#if detail}
-				{@render output(detail)}
-			{/if}
-			{#if result}
-				{@render output(result.output, result.error)}
-			{:else if !pending}
-				{@render output('interrupted')}
-			{/if}
+		{:else if detail || result || !pending}
+			<div class="flex flex-col gap-1.5 rounded-control surface p-1.5">
+				{#if detail}
+					{@render block(
+						detail,
+						'max-h-60 rounded-input bg-alternate-base px-2 py-1.5 text-window-text'
+					)}
+				{/if}
+				{#if result}
+					{@render block(result.output, [
+						'max-h-90 px-1.5 py-0.5',
+						result.error ? 'text-danger' : 'text-secondary'
+					])}
+				{:else if !pending}
+					{@render block('interrupted', 'px-1.5 py-0.5 text-secondary')}
+				{/if}
+			</div>
 		{/if}
 	{/if}
 </div>
