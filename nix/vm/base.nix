@@ -82,8 +82,15 @@
     };
 
     users.users.agent = {
-      isNormalUser = lib.mkForce true;
+      isNormalUser = lib.mkForce (config.tsoup.uid >= 1000);
+      isSystemUser = lib.mkForce (config.tsoup.uid < 1000);
       uid = lib.mkForce config.tsoup.uid;
+      group = lib.mkDefault "users";
+      createHome = lib.mkDefault true;
+      home = lib.mkDefault "/home/agent";
+      homeMode = lib.mkDefault "700";
+      useDefaultShell = lib.mkDefault true;
+      autoSubUidGidRange = lib.mkDefault true;
       extraGroups = [ "wheel" ];
     };
 
