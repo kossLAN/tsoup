@@ -43,7 +43,6 @@
 	];
 
 	const id = $props.id();
-	const requested = new Set<string>();
 
 	let button = $state<HTMLButtonElement>();
 	let popup = $state<HTMLElement>();
@@ -80,6 +79,7 @@
 
 	onMount(async () => {
 		settings = await getSettings();
+		for (const provider of settings.providers) list(provider);
 	});
 
 	function beforetoggle(event: ToggleEvent) {
@@ -95,12 +95,6 @@
 			stop = follow(button, popup, placement);
 			input?.focus();
 		});
-
-		for (const provider of settings?.providers ?? []) {
-			if (requested.has(provider.id)) continue;
-			requested.add(provider.id);
-			list(provider);
-		}
 	}
 
 	async function list(provider: Provider) {
