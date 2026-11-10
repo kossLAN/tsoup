@@ -22,7 +22,17 @@
         "aarch64-linux"
       ];
 
-      eachSystem = f: lib.genAttrs systems (system: f nixpkgs.legacyPackages.${system});
+      eachSystem =
+        f:
+        lib.genAttrs systems (
+          system:
+          f (
+            import nixpkgs {
+              inherit system;
+              config.allowUnfreePredicate = package: lib.getName package == "claude-code";
+            }
+          )
+        );
     in
     {
       packages = eachSystem (pkgs: rec {
@@ -33,6 +43,8 @@
       });
 
       lib = import ./nix/vm { inherit self nixpkgs microvm; };
+
+      nixosModules.default = import ./nix/nixos self;
 
       devShells = eachSystem (pkgs: {
         default = import ./shell.nix { inherit pkgs; };

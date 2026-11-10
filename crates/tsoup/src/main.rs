@@ -10,7 +10,6 @@ mod workspace;
 
 use std::env;
 use std::io::{self, Write as _};
-use std::net::SocketAddr;
 use std::os::unix::fs::MetadataExt as _;
 use std::path::PathBuf;
 use std::process::ExitCode;
@@ -38,11 +37,19 @@ use self::vm::Builder;
 struct Cli {
     #[arg(
         long,
-        env = "TSOUP_LISTEN",
-        default_value = "127.0.0.1:7878",
-        help = "The address to serve the API on"
+        env = "TSOUP_HOSTNAME",
+        default_value = "127.0.0.1",
+        help = "The hostname or address to serve the API on"
     )]
-    listen: SocketAddr,
+    hostname: String,
+
+    #[arg(
+        long,
+        env = "TSOUP_PORT",
+        default_value_t = 7878,
+        help = "The port to serve the API on"
+    )]
+    port: u16,
 
     #[arg(
         long,
@@ -122,12 +129,13 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let shutdown = CancellationToken::new();
     let state = AppState::new(sessions, agent, settings, claude_code, shutdown.clone());
 
-    let listener = TcpListener::bind(cli.listen)
+    let listener = TcpListener::bind((cli.hostname.as_str(), cli.port))
         .await
-        .with_context(|| format!("listening on {}", cli.listen))?;
+        .with_context(|| format!("listening on {}:{}", cli.hostname, cli.port))?;
+    let address = listener.local_addr()?;
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
-    tracing::info!(address = %cli.listen, "serving the API");
+    tracing::info!(%address, "serving the API");
 
     axum::serve(listener, api::router(state))
         .with_graceful_shutdown(async move {

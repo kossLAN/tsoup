@@ -5,6 +5,8 @@
   fetchNpmDeps,
   npmHooks,
   nodejs_24,
+  makeWrapper,
+  claude-code,
   flake,
   extraModules ? [ ],
 }:
@@ -61,9 +63,14 @@ rustPlatform.buildRustPackage {
   nativeBuildInputs = [
     nodejs_24
     npmHooks.npmConfigHook
+    makeWrapper
   ];
 
   env.TSOUP_FLAKE = "path:${vmFlake}";
+
+  postInstall = ''
+    wrapProgram $out/bin/tsoup --prefix PATH : ${lib.makeBinPath [ claude-code ]}
+  '';
 
   meta.mainProgram = "tsoup";
 }
