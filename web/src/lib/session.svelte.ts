@@ -105,6 +105,12 @@ export class Thread {
 		this.start = Math.min(this.start, length);
 	}
 
+	clear() {
+		this.entries = [];
+		this.start = 0;
+		this.settle();
+	}
+
 	settle() {
 		this.draft = null;
 		this.compacting = false;
@@ -196,6 +202,15 @@ export class Session {
 				break;
 			case 'progress':
 				this.#find(event.agent)?.progress(event.progress);
+				break;
+			case 'title':
+				this.title = event.title;
+				break;
+			case 'cleared':
+				this.main.clear();
+				this.#threads.clear();
+				this.agents = [];
+				this.questions = [];
 				break;
 			case 'rewind':
 				this.main.rewind(event.length);

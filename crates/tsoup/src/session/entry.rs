@@ -88,6 +88,10 @@ pub enum Record {
         agent: Option<Uuid>,
         entry: Entry,
     },
+    Title {
+        title: String,
+    },
+    Clear,
     Rewind {
         length: usize,
     },
@@ -146,6 +150,10 @@ pub enum Event {
     Questions {
         questions: Vec<Question>,
     },
+    Title {
+        title: String,
+    },
+    Cleared,
     Rewind {
         length: usize,
     },

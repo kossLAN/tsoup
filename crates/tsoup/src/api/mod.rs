@@ -82,7 +82,10 @@ pub fn router(state: AppState) -> Router {
             patch(update_session).delete(delete_session),
         )
         .route("/api/sessions/{id}/events", get(events))
-        .route("/api/sessions/{id}/entries", get(list_entries))
+        .route(
+            "/api/sessions/{id}/entries",
+            get(list_entries).delete(clear_entries),
+        )
         .route("/api/sessions/{id}/turns", post(start_turn))
         .route("/api/sessions/{id}/turn", delete(cancel_turn))
         .route("/api/sessions/{id}/compact", post(compact))
@@ -144,6 +147,7 @@ struct NewSession {
 #[derive(Deserialize)]
 struct SessionPatch {
     selection: Option<Selection>,
+    title: Option<String>,
 }
 
 fn prompt(text: String, images: Vec<Image>) -> Result<Entry, ApiError> {
@@ -243,6 +247,10 @@ async fn update_session(
         state.settings.remember_effort(effort).await?;
     }
 
+    if let Some(title) = patch.title {
+        session.rename(&title).await?;
+    }
+
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -290,6 +298,14 @@ async fn list_entries(
     let session = state.session(id).await?;
     let agent = query.agent.unwrap_or(session.id);
     Ok(Json(session.page(agent, query.before).await?))
+}
+
+async fn clear_entries(
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    state.session(id).await?.clear().await?;
+    Ok(StatusCode::NO_CONTENT)
 }
 
 async fn start_turn(

@@ -5,6 +5,7 @@ export { default as ArrowLeftIcon } from 'phosphor-svelte/lib/ArrowLeftIcon';
 export { default as ArrowsClockwiseIcon } from 'phosphor-svelte/lib/ArrowsClockwiseIcon';
 export { default as ArrowSquareOutIcon } from 'phosphor-svelte/lib/ArrowSquareOutIcon';
 export { default as BrainIcon } from 'phosphor-svelte/lib/BrainIcon';
+export { default as BroomIcon } from 'phosphor-svelte/lib/BroomIcon';
 export { default as CaretDownIcon } from 'phosphor-svelte/lib/CaretDownIcon';
 export { default as CaretRightIcon } from 'phosphor-svelte/lib/CaretRightIcon';
 export { default as CheckIcon } from 'phosphor-svelte/lib/CheckIcon';

@@ -38,6 +38,7 @@ pub struct Settings {
     pub default_model: Option<ModelChoice>,
     pub last_effort: Option<Effort>,
     pub hide_thinking: bool,
+    pub agent_titles: bool,
     pub prompts: Prompts,
     pub compaction: Compaction,
     pub subagents: Subagents,
@@ -228,6 +229,7 @@ pub struct SettingsView {
     pub default_model: Option<ModelChoice>,
     pub last_effort: Option<Effort>,
     pub hide_thinking: bool,
+    pub agent_titles: bool,
     pub prompts: PromptsView,
     pub compaction: Compaction,
     pub subagents: Subagents,
@@ -263,6 +265,7 @@ impl From<&Settings> for SettingsView {
             default_model: settings.default_model.clone(),
             last_effort: settings.last_effort,
             hide_thinking: settings.hide_thinking,
+            agent_titles: settings.agent_titles,
             prompts: settings.prompts.view(),
             compaction: settings.compaction,
             subagents: settings.subagents.clone(),
@@ -275,6 +278,7 @@ pub struct SettingsPatch {
     pub providers: Option<Vec<ProviderUpdate>>,
     pub default_model: Option<ModelChoice>,
     pub hide_thinking: Option<bool>,
+    pub agent_titles: Option<bool>,
     pub prompts: Option<Prompts>,
     pub compaction: Option<Compaction>,
     pub subagents: Option<Subagents>,
@@ -379,6 +383,10 @@ impl SettingsStore {
 
         if let Some(hide) = patch.hide_thinking {
             updated.hide_thinking = hide;
+        }
+
+        if let Some(titles) = patch.agent_titles {
+            updated.agent_titles = titles;
         }
 
         if let Some(prompts) = patch.prompts {

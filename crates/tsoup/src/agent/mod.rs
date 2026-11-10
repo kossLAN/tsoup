@@ -15,7 +15,7 @@ use uuid::Uuid;
 
 use self::conversation::{context, conversation};
 use self::tools::{Caller, Scope, Tools};
-use crate::llm::{Effort, LlmError, Model, Provider};
+use crate::llm::{Effort, LlmError, Message, Model, Provider};
 use crate::session::{Context, Entry, Environment, Event, Session, SessionError};
 use crate::settings::{ProviderSettings, Settings, SettingsStore};
 use crate::vm::describe;
@@ -55,6 +55,7 @@ struct Turn {
     window: u64,
     auto: bool,
     scope: Scope,
+    titles: bool,
 }
 
 impl Turn {
@@ -85,11 +86,46 @@ impl Agent {
     pub async fn run_turn(self: Arc<Self>, session: Arc<Session>, prompt: Entry) {
         let turn = async {
             let turn = self.prepare(&session, session.id, 0).await?;
+
+            if turn.titles
+                && !session.titled().await
+                && let Entry::User { text, .. } = &prompt
+                && !text.is_empty()
+            {
+                tokio::spawn(Arc::clone(&self).title(Arc::clone(&session), text.clone()));
+            }
+
             session.push(session.id, prompt).await?;
             self.drive(&session, session.id, &turn).await?;
             Ok(())
         };
         supervise(&session, turn).await;
+    }
+
+    async fn title(self: Arc<Self>, session: Arc<Session>, text: String) {
+        let titled = async {
+            let turn = self.prepare(&session, session.id, 0).await?;
+            let messages = [
+                Message::System {
+                    content: prompt::TITLE.to_owned(),
+                },
+                Message::user(text),
+            ];
+            let reply = turn
+                .llm
+                .complete(&turn.model, None, &messages, &[], &|_| {})
+                .await?;
+
+            if let Some(title) = reply.content {
+                session.rename(title.trim().trim_matches('"')).await?;
+            }
+
+            Ok::<_, TurnError>(())
+        };
+
+        if let Err(error) = titled.await {
+            tracing::warn!(session = %session.id, %error, "titling a session");
+        }
     }
 
     pub async fn run_regeneration(self: Arc<Self>, session: Arc<Session>) {
@@ -165,6 +201,7 @@ impl Agent {
             window,
             auto: settings.compaction.auto,
             scope,
+            titles: settings.agent_titles,
         })
     }
 

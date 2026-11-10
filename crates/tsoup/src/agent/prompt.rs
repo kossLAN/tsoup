@@ -35,3 +35,7 @@ pub fn models(labels: &[String]) -> String {
         labels.join("\n")
     )
 }
+
+pub const TITLE: &str =
+    "Write a title of at most six words for a session that starts with the message below.
+Reply with the title only, without quotes.";

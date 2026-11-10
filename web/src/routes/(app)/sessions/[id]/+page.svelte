@@ -3,6 +3,7 @@
 	import { page } from '$app/state';
 	import {
 		cancelTurn,
+		clearSession,
 		compactSession,
 		destroyVm,
 		getSettings,
@@ -16,6 +17,8 @@
 	} from '$lib/api';
 	import Composer from '$lib/components/Composer.svelte';
 	import ContextMeter from '$lib/components/ContextMeter.svelte';
+	import Menu from '$lib/components/Menu.svelte';
+	import MenuItem from '$lib/components/MenuItem.svelte';
 	import ModelNotice from '$lib/components/ModelNotice.svelte';
 	import ModelPicker from '$lib/components/ModelPicker.svelte';
 	import PreviewPane from '$lib/components/PreviewPane.svelte';
@@ -23,9 +26,12 @@
 	import SidePanel from '$lib/components/SidePanel.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
 	import {
+		BroomIcon,
 		DesktopTowerIcon,
+		DotsThreeIcon,
 		FolderIcon,
 		MonitorIcon,
+		PencilSimpleIcon,
 		PlayIcon,
 		TreeStructureIcon
 	} from '$lib/icons';
@@ -42,6 +48,7 @@
 	let widths = $state({ preview: stored('preview'), activity: stored('activity') ?? 288 });
 	let failure = $state<string | null>(null);
 	let hideThinking = $state(true);
+	let name = $state<string | null>(null);
 	let asked = 0;
 
 	const activity = $derived(session.agents.length > 0 || session.questions.length > 0);
@@ -107,6 +114,27 @@
 		}
 	}
 
+	async function rename() {
+		const title = name?.trim();
+		name = null;
+		if (!title || title === session.title) return;
+		failure = null;
+		try {
+			await patchSession(session.id, { title });
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
+		}
+	}
+
+	async function clear() {
+		failure = null;
+		try {
+			await clearSession(session.id);
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
+		}
+	}
+
 	async function compact() {
 		failure = null;
 		try {
@@ -147,9 +175,23 @@
 <div class="flex min-w-0 flex-1">
 	<div class="flex min-w-0 flex-1 flex-col">
 		<header class="toolbar pr-3 pl-11">
-			<span class="flex-1 truncate text-title font-medium"
-				>{session.title || 'New session'}</span
-			>
+			{#if name === null}
+				<span class="flex-1 truncate text-title font-medium"
+					>{session.title || 'New session'}</span
+				>
+			{:else}
+				<input
+					class="input text-title font-medium"
+					bind:value={name}
+					onkeydown={(event) => {
+						if (event.key === 'Enter') rename();
+						if (event.key === 'Escape') name = null;
+					}}
+					onblur={rename}
+					spellcheck="false"
+					{@attach (input) => input.select()}
+				/>
+			{/if}
 			{#if node}
 				<span
 					class="flex items-center gap-1.5 px-1.5 text-label text-secondary"
@@ -179,6 +221,21 @@
 					<MonitorIcon size={16} />
 				</button>
 			{/if}
+			<Menu placement="bottom-end">
+				{#snippet trigger(attributes)}
+					<button class="icon-button" {...attributes} {@attach tooltip('More')}>
+						<DotsThreeIcon size={16} weight="bold" />
+					</button>
+				{/snippet}
+				<MenuItem onselect={() => (name = session.title)}>
+					<PencilSimpleIcon size={14} />
+					Rename
+				</MenuItem>
+				<MenuItem disabled={session.busy} onselect={clear}>
+					<BroomIcon size={14} />
+					Clear chat
+				</MenuItem>
+			</Menu>
 			{#if activity && !panel}
 				<button
 					class="relative icon-button"

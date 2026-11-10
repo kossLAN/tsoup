@@ -112,6 +112,8 @@ export type SessionEvent =
 	| { type: 'progress'; agent: string; progress: Progress }
 	| { type: 'agent'; agent: AgentSummary }
 	| { type: 'questions'; questions: Question[] }
+	| { type: 'title'; title: string }
+	| { type: 'cleared' }
 	| { type: 'rewind'; length: number }
 	| { type: 'compacting'; agent: string };
 
@@ -125,6 +127,7 @@ export type ListEvent =
 	| { type: 'created'; session: SessionSummary }
 	| { type: 'removed'; id: string }
 	| { type: 'busy'; id: string; busy: boolean }
+	| { type: 'title'; id: string; title: string }
 	| { type: 'environment'; id: string; environment: EnvironmentStatus }
 	| { type: 'nodes'; nodes: NodeSummary[] };
 
@@ -160,8 +163,15 @@ export async function createSession(
 	).json();
 }
 
-export async function patchSession(id: string, patch: { selection?: Selection }): Promise<void> {
+export async function patchSession(
+	id: string,
+	patch: { selection?: Selection; title?: string }
+): Promise<void> {
 	await request('PATCH', `/api/sessions/${id}`, patch);
+}
+
+export async function clearSession(id: string): Promise<void> {
+	await request('DELETE', `/api/sessions/${id}/entries`);
 }
 
 export async function deleteSession(id: string): Promise<void> {
@@ -266,6 +276,7 @@ export type Settings = {
 	default_model: ModelChoice | null;
 	last_effort: Effort | null;
 	hide_thinking: boolean;
+	agent_titles: boolean;
 	prompts: { sandbox: Prompt; node: Prompt; subagent: Prompt };
 	subagents: Subagents;
 	compaction: Compaction;
@@ -301,6 +312,7 @@ export type SettingsPatch = {
 	providers?: ProviderUpdate[];
 	default_model?: ModelChoice;
 	hide_thinking?: boolean;
+	agent_titles?: boolean;
 	prompts?: { sandbox: string | null; node: string | null; subagent: string | null };
 	subagents?: Subagents;
 	compaction?: Compaction;

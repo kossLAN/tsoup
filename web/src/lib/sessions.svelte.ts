@@ -91,6 +91,9 @@ class SessionList {
 				this.#unconfirmed.delete(event.id);
 				this.#forget(event.id);
 				break;
+			case 'title':
+				this.rename(event.id, event.title);
+				break;
 			case 'busy': {
 				const session = this.items.find((session) => session.id === event.id);
 				if (!session) break;

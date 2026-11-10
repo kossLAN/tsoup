@@ -83,6 +83,10 @@ pub enum ListEvent {
         id: Uuid,
         busy: bool,
     },
+    Title {
+        id: Uuid,
+        title: String,
+    },
     Environment {
         id: Uuid,
         environment: EnvironmentStatus,
@@ -120,6 +124,10 @@ impl Events {
                     busy: false,
                 })
             },
+            Event::Title { title } => Some(ListEvent::Title {
+                id: self.id,
+                title: title.clone(),
+            }),
             Event::Environment { environment } => Some(ListEvent::Environment {
                 id: self.id,
                 environment: environment.clone(),
@@ -139,6 +147,7 @@ impl Events {
 }
 
 struct SessionData {
+    titled: bool,
     title: String,
     threads: Vec<Thread>,
     questions: Vec<Pending>,
@@ -150,6 +159,7 @@ impl SessionData {
     fn new(id: Uuid) -> Self {
         Self {
             title: String::new(),
+            titled: false,
             threads: vec![Thread::main(id)],
             questions: Vec::new(),
             actions: Vec::new(),
@@ -193,6 +203,17 @@ impl SessionData {
                     index: thread.entries.len() - 1,
                     entry,
                 })
+            },
+            Record::Title { title } => {
+                self.title.clone_from(&title);
+                self.titled = true;
+                Some(Event::Title { title })
+            },
+            Record::Clear => {
+                self.threads.truncate(1);
+                self.threads[0].entries.clear();
+                self.questions.clear();
+                Some(Event::Cleared)
             },
             Record::Rewind { length } => {
                 self.threads[0].entries.truncate(length);
@@ -549,6 +570,30 @@ impl Session {
         data.thread(agent)?;
         let agent = (agent != self.id).then_some(agent);
         self.record(&mut data, Record::Entry { agent, entry }).await
+    }
+
+    pub async fn titled(&self) -> bool {
+        self.data.lock().await.titled
+    }
+
+    pub async fn rename(&self, name: &str) -> Result<(), SessionError> {
+        let title = title(name);
+
+        if title.is_empty() {
+            return Ok(());
+        }
+
+        let mut data = self.data.lock().await;
+        self.record(&mut data, Record::Title { title }).await
+    }
+
+    pub async fn clear(&self) -> Result<(), SessionError> {
+        if self.busy().await {
+            return Err(SessionError::Busy);
+        }
+
+        let mut data = self.data.lock().await;
+        self.record(&mut data, Record::Clear).await
     }
 
     pub async fn rewind(&self, length: usize) -> Result<(), SessionError> {
