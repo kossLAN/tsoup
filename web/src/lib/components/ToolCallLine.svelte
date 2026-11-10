@@ -52,6 +52,14 @@
 		}
 	});
 
+	const questions = $derived(
+		Array.isArray(args.questions)
+			? args.questions.flatMap((asked) =>
+					typeof asked?.question === 'string' ? [asked.question as string] : []
+				)
+			: []
+	);
+
 	const target = $derived.by(() => {
 		if (typeof args.command === 'string') return args.command;
 		if (typeof args.path === 'string') return args.path;
@@ -59,7 +67,8 @@
 		if (typeof args.query === 'string') return args.query;
 		if (typeof args.port === 'number') return `port ${args.port}`;
 		if (typeof args.name === 'string') return args.name;
-		if (typeof args.question === 'string') return args.question;
+		if (questions.length === 1) return questions[0];
+		if (questions.length) return `${questions.length} questions`;
 		return '';
 	});
 
@@ -69,7 +78,7 @@
 		}
 		if (call.function.name === 'shell' && typeof args.command === 'string') return args.command;
 		if (typeof args.prompt === 'string') return args.prompt;
-		if (typeof args.question === 'string') return args.question;
+		if (questions.length) return questions.join('\n');
 		return null;
 	});
 </script>
