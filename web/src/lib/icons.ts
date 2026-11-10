@@ -24,6 +24,7 @@ export { default as PlayIcon } from 'phosphor-svelte/lib/PlayIcon';
 export { default as PlugsConnectedIcon } from 'phosphor-svelte/lib/PlugsConnectedIcon';
 export { default as PlusIcon } from 'phosphor-svelte/lib/PlusIcon';
 export { default as PowerIcon } from 'phosphor-svelte/lib/PowerIcon';
+export { default as QuestionIcon } from 'phosphor-svelte/lib/QuestionIcon';
 export { default as RobotIcon } from 'phosphor-svelte/lib/RobotIcon';
 export { default as SidebarSimpleIcon } from 'phosphor-svelte/lib/SidebarSimpleIcon';
 export { default as SlidersHorizontalIcon } from 'phosphor-svelte/lib/SlidersHorizontalIcon';

@@ -1,9 +1,14 @@
 <script lang="ts">
 	import { answerQuestion, type Question } from '$lib/api';
 	import { ArrowElbowDownLeftIcon } from '$lib/icons';
+	import Markdown from './Markdown.svelte';
 
-	let { session, question, asker }: { session: string; question: Question; asker: string } =
-		$props();
+	let {
+		session,
+		question,
+		asker,
+		onanswered
+	}: { session: string; question: Question; asker: string; onanswered: () => void } = $props();
 
 	let text = $state('');
 	let sending = $state(false);
@@ -15,6 +20,7 @@
 		failure = null;
 		try {
 			await answerQuestion(session, question.id, content.trim());
+			onanswered();
 		} catch (error) {
 			failure = error instanceof Error ? error.message : String(error);
 		}
@@ -22,21 +28,21 @@
 	}
 
 	function keydown(event: KeyboardEvent) {
-		if (event.key === 'Enter') {
+		if (event.key === 'Enter' && !event.shiftKey) {
 			event.preventDefault();
 			answer(text);
 		}
 	}
 </script>
 
-<div class="flex flex-col gap-1.5 rounded-control surface p-2">
-	<span class="text-label text-secondary">{asker}</span>
-	<p class="wrap-break-word whitespace-pre-wrap">{question.text}</p>
+<div class="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-3 pt-1 pb-3">
+	<span class="label">{asker}</span>
+	<Markdown text={question.text} />
 	{#if question.options.length}
-		<div class="flex flex-wrap gap-1.5">
+		<div class="flex flex-col gap-1">
 			{#each question.options as option (option)}
 				<button
-					class="button h-auto min-h-6.5 bg-alternate-base px-2 py-1 text-left text-label enabled:hover:bg-window-text/8"
+					class="rounded-input surface px-2.5 py-1.5 text-left transition-colors enabled:hover:bg-alternate-base disabled:opacity-50"
 					disabled={sending}
 					onclick={() => answer(option)}
 				>
@@ -45,14 +51,16 @@
 			{/each}
 		</div>
 	{/if}
-	<div class="flex items-center gap-1.5">
-		<input
-			class="input"
+	<div
+		class="flex items-end gap-1 rounded-control surface py-1 pr-1 pl-2.5 transition-colors focus-within:border-accent"
+	>
+		<textarea
+			class="max-h-40 min-h-6.5 flex-1 resize-none py-1 outline-none placeholder:text-secondary"
 			bind:value={text}
 			onkeydown={keydown}
-			placeholder="Answer"
-			spellcheck="false"
-		/>
+			rows="2"
+			placeholder={question.options.length ? 'Or write your own answer' : 'Write your answer'}
+		></textarea>
 		<button
 			class="icon-button"
 			disabled={!text.trim() || sending}
