@@ -279,6 +279,7 @@ export type Settings = {
 	agent_titles: boolean;
 	prompts: { sandbox: Prompt; node: Prompt; subagent: Prompt };
 	subagents: Subagents;
+	vm: VmSettings;
 	compaction: Compaction;
 };
 
@@ -290,6 +291,12 @@ export type Prompt = {
 export type Compaction = {
 	auto: boolean;
 	window: number;
+};
+
+export type VmSettings = {
+	memory: number;
+	cpus: number;
+	gpu: boolean;
 };
 
 export type Subagents = {
@@ -315,6 +322,7 @@ export type SettingsPatch = {
 	agent_titles?: boolean;
 	prompts?: { sandbox: string | null; node: string | null; subagent: string | null };
 	subagents?: Subagents;
+	vm?: VmSettings;
 	compaction?: Compaction;
 };
 

@@ -1,12 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/state';
-	import { PlugsConnectedIcon, RobotIcon, SlidersHorizontalIcon } from '$lib/icons';
+	import { CubeIcon, PlugsConnectedIcon, RobotIcon, SlidersHorizontalIcon } from '$lib/icons';
 
 	let { children } = $props();
 
 	const sections = [
 		{ href: '/settings/general', label: 'General', icon: SlidersHorizontalIcon },
 		{ href: '/settings/agent', label: 'Agent', icon: RobotIcon },
+		{ href: '/settings/vm', label: 'Virtual machines', icon: CubeIcon },
 		{ href: '/settings/providers', label: 'Providers', icon: PlugsConnectedIcon }
 	];
 </script>

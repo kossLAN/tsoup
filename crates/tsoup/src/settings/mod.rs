@@ -18,6 +18,9 @@ const DEFAULT_WINDOW: u64 = 200_000;
 const MIN_WINDOW: u64 = 1_000;
 const DEFAULT_DEPTH: usize = 3;
 const MAX_DEPTH: usize = 5;
+const DEFAULT_MEMORY: u32 = 4096;
+const MIN_MEMORY: u32 = 512;
+const DEFAULT_CPUS: u32 = 4;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
@@ -42,6 +45,7 @@ pub struct Settings {
     pub prompts: Prompts,
     pub compaction: Compaction,
     pub subagents: Subagents,
+    pub vm: VmSettings,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -68,6 +72,24 @@ pub struct Subagents {
     pub model: Option<ModelChoice>,
     pub effort: Option<Effort>,
     pub models: Vec<ModelChoice>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
+pub struct VmSettings {
+    pub memory: u32,
+    pub cpus: u32,
+    pub gpu: bool,
+}
+
+impl Default for VmSettings {
+    fn default() -> Self {
+        Self {
+            memory: DEFAULT_MEMORY,
+            cpus: DEFAULT_CPUS,
+            gpu: false,
+        }
+    }
 }
 
 impl Default for Subagents {
@@ -233,6 +255,7 @@ pub struct SettingsView {
     pub prompts: PromptsView,
     pub compaction: Compaction,
     pub subagents: Subagents,
+    pub vm: VmSettings,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -269,6 +292,7 @@ impl From<&Settings> for SettingsView {
             prompts: settings.prompts.view(),
             compaction: settings.compaction,
             subagents: settings.subagents.clone(),
+            vm: settings.vm,
         }
     }
 }
@@ -282,6 +306,7 @@ pub struct SettingsPatch {
     pub prompts: Option<Prompts>,
     pub compaction: Option<Compaction>,
     pub subagents: Option<Subagents>,
+    pub vm: Option<VmSettings>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -402,6 +427,14 @@ impl SettingsStore {
 
         if let Some(subagents) = patch.subagents {
             updated.subagents = subagents;
+        }
+
+        if let Some(vm) = patch.vm {
+            updated.vm = VmSettings {
+                memory: vm.memory.max(MIN_MEMORY),
+                cpus: vm.cpus.max(1),
+                ..vm
+            };
         }
 
         updated.prune();

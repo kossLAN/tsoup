@@ -11,6 +11,21 @@
       internal = true;
     };
 
+    memory = lib.mkOption {
+      type = lib.types.ints.positive;
+      internal = true;
+    };
+
+    cpus = lib.mkOption {
+      type = lib.types.ints.positive;
+      internal = true;
+    };
+
+    gpu = lib.mkOption {
+      type = lib.types.bool;
+      internal = true;
+    };
+
     guestAgent = lib.mkOption {
       type = lib.types.package;
       internal = true;
@@ -38,9 +53,14 @@
 
     microvm = {
       hypervisor = lib.mkForce "qemu";
-      mem = lib.mkForce 4096;
-      vcpu = lib.mkForce 4;
+      mem = lib.mkForce config.tsoup.memory;
+      vcpu = lib.mkForce config.tsoup.cpus;
       socket = lib.mkForce null;
+
+      graphics = {
+        enable = lib.mkForce config.tsoup.gpu;
+        backend = lib.mkForce "headless";
+      };
 
       shares = lib.mkForce [
         {

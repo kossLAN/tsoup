@@ -110,7 +110,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             .await
             .context("loading settings")?,
     );
-    let builder = Arc::new(Builder::new(uid));
+    let builder = Arc::new(Builder::new(uid, Arc::clone(&settings)));
     let sessions = Sessions::load(sessions_dir, runtime_dir, builder)
         .await
         .context("loading sessions")?;

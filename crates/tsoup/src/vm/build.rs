@@ -1,9 +1,12 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use tokio::process::Command;
+
+use crate::settings::{SettingsStore, VmSettings};
 
 const ENVIRONMENT_FLAKE: &str = include_str!("flake.nix");
 const TSOUP_FLAKE: &str = match option_env!("TSOUP_FLAKE") {
@@ -35,15 +38,18 @@ struct Host {
     #[serde(default)]
     modules: Vec<String>,
     runtime: PathBuf,
+    #[serde(flatten, default)]
+    vm: VmSettings,
 }
 
 pub struct Builder {
+    settings: Arc<SettingsStore>,
     uid: u32,
 }
 
 impl Builder {
-    pub fn new(uid: u32) -> Self {
-        Self { uid }
+    pub fn new(uid: u32, settings: Arc<SettingsStore>) -> Self {
+        Self { settings, uid }
     }
 
     pub async fn build(
@@ -68,6 +74,7 @@ impl Builder {
                 uid: self.uid,
                 modules,
                 runtime: runtime.to_owned(),
+                vm: self.settings.get().await.vm,
             })?,
         )
         .await?;

@@ -33,6 +33,9 @@ in
       uid,
       modules,
       runtime,
+      memory,
+      cpus,
+      gpu,
       module,
     }:
     let
@@ -41,7 +44,13 @@ in
       unknown = lib.subtractLists available modules;
 
       host.tsoup = {
-        inherit uid runtime;
+        inherit
+          uid
+          runtime
+          memory
+          cpus
+          gpu
+          ;
         guestAgent = self.packages.${system}.tsoup-guest;
         modules = lib.genAttrs modules (_: {
           enable = true;

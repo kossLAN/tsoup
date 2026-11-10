@@ -53,7 +53,7 @@ in
 
       environment.sessionVariables = {
         WLR_BACKENDS = "headless";
-        WLR_RENDERER = "pixman";
+        WLR_RENDERER = if config.tsoup.gpu then "gles2" else "pixman";
       };
 
       fonts.enableDefaultPackages = lib.mkForce true;
