@@ -242,11 +242,13 @@ export function sessionEvents(id: string): EventSource {
 }
 
 export function previewUrl(id: string, preview: Preview): string {
-	const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(location.hostname);
-	const host = loopback ? 'localhost' : location.hostname;
-	const port = import.meta.env.DEV ? import.meta.env.VITE_BACKEND_PORT : location.port;
-	const origin = port ? `${host}:${port}` : host;
-	return `${location.protocol}//${preview.name}.${id}.${origin}${preview.path}`;
+	const path = `/preview/${id}/${preview.name}${preview.path}`;
+
+	if (!import.meta.env.DEV) {
+		return path;
+	}
+
+	return `${location.protocol}//${location.hostname}:${import.meta.env.VITE_BACKEND_PORT}${path}`;
 }
 
 export type ProviderKind = 'chat_completions' | 'responses' | 'anthropic' | 'claude_code';
