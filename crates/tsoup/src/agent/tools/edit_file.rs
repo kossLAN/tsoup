@@ -1,8 +1,7 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{Outcome, Tool, ToolError};
-use crate::session::Session;
+use super::{Caller, Outcome, Tool, ToolError};
 use crate::workspace::Workspace;
 
 pub struct EditFile;
@@ -25,7 +24,7 @@ impl<E: Workspace> Tool<E> for EditFile {
 
     async fn run(
         &self,
-        _session: &Session,
+        _caller: &Caller<'_>,
         environment: &E,
         Arguments { path, old, new }: Arguments,
     ) -> Result<Outcome, ToolError> {

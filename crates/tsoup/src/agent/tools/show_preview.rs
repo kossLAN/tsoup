@@ -1,8 +1,8 @@
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{Outcome, Tool, ToolError};
-use crate::session::{Sandbox, Session};
+use super::{Caller, Outcome, Scope, Tool, ToolError};
+use crate::session::Sandbox;
 
 pub struct ShowPreview;
 
@@ -24,9 +24,13 @@ After the VM restarts, the user's action buttons show it again.";
 
     type Arguments = Arguments;
 
+    fn available(scope: Scope) -> bool {
+        scope.depth == 0
+    }
+
     async fn run(
         &self,
-        _session: &Session,
+        _caller: &Caller<'_>,
         environment: &Sandbox,
         Arguments { preview, port }: Arguments,
     ) -> Result<Outcome, ToolError> {

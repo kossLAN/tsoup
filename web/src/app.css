@@ -65,12 +65,12 @@
 }
 
 @utility icon-button {
-	@apply inline-flex size-6.5 shrink-0 items-center justify-center rounded-full transition-colors;
+	@apply inline-flex size-6.5 shrink-0 items-center justify-center rounded-input transition-colors;
 	@apply not-disabled:hover:bg-window-text/8 disabled:opacity-50;
 }
 
 @utility button {
-	@apply inline-flex h-7 items-center rounded-control px-3 transition-colors disabled:opacity-50;
+	@apply inline-flex h-7 items-center rounded-input px-3 transition-colors disabled:opacity-50;
 }
 
 @utility surface {
@@ -86,12 +86,17 @@
 	@apply transition-colors placeholder:text-secondary focus:border-accent;
 }
 
+@utility textarea {
+	@apply min-h-48 w-full resize-y rounded-input border border-light bg-alternate-base px-2.5 py-2;
+	@apply font-mono text-label/relaxed transition-colors outline-none focus:border-accent;
+}
+
 @utility toolbar {
 	@apply flex h-11 shrink-0 items-center gap-2;
 }
 
 @utility nav-item {
-	@apply flex h-8 items-center rounded-control transition-colors hover:bg-window-text/8;
+	@apply flex h-8 items-center rounded-input transition-colors hover:bg-window-text/8;
 }
 
 @utility popover-fade {
@@ -192,6 +197,22 @@
 		@apply rounded-control border border-light;
 	}
 
+	& :where(.code) {
+		@apply my-3 overflow-hidden rounded-control border border-light bg-base;
+	}
+
+	& :where(.code-bar) {
+		@apply flex h-7 items-center justify-between border-b border-light pr-1 pl-3 font-sans text-label text-secondary;
+	}
+
+	& :where(.code-bar button) {
+		@apply h-5.5 rounded-input px-1.5 transition-colors hover:bg-window-text/8 hover:text-window-text;
+	}
+
+	& .code pre {
+		@apply m-0 rounded-none border-0;
+	}
+
 	& :where(code):not(:where(pre code)) {
 		@apply rounded-small bg-alternate-base px-1 py-0.5 font-normal;
 	}
@@ -202,4 +223,68 @@
 	& :where(blockquote p)::after {
 		content: none;
 	}
+}
+
+.hljs-comment,
+.hljs-quote,
+.hljs-meta {
+	color: var(--color-secondary);
+}
+
+.hljs-keyword,
+.hljs-selector-tag,
+.hljs-name,
+.hljs-section {
+	color: #78a9ff;
+}
+
+.hljs-string,
+.hljs-regexp,
+.hljs-symbol,
+.hljs-template-tag {
+	color: #be95ff;
+}
+
+.hljs-number,
+.hljs-literal,
+.hljs-bullet,
+.hljs-link {
+	color: #82cfff;
+}
+
+.hljs-title,
+.hljs-selector-id,
+.hljs-selector-class {
+	color: #ff7eb6;
+}
+
+.hljs-type,
+.hljs-built_in,
+.hljs-title.class_ {
+	color: #3ddbd9;
+}
+
+.hljs-attr,
+.hljs-attribute,
+.hljs-property,
+.hljs-variable,
+.hljs-template-variable,
+.hljs-params {
+	color: #33b1ff;
+}
+
+.hljs-addition {
+	color: var(--color-positive);
+}
+
+.hljs-deletion {
+	color: var(--color-negative);
+}
+
+.hljs-emphasis {
+	font-style: italic;
+}
+
+.hljs-strong {
+	font-weight: 600;
 }

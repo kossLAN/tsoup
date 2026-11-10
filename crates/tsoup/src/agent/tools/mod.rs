@@ -1,3 +1,4 @@
+mod ask;
 mod create_vm;
 mod destroy_vm;
 mod edit_file;
@@ -7,6 +8,7 @@ mod run_vm;
 mod set_actions;
 mod shell;
 mod show_preview;
+mod spawn_agent;
 mod write_file;
 
 use futures_util::future::BoxFuture;
@@ -15,7 +17,9 @@ use schemars::generate::SchemaSettings;
 use serde::de::DeserializeOwned;
 use similar::TextDiff;
 use tsoup_proto::McpFailure;
+use uuid::Uuid;
 
+use self::ask::Ask;
 use self::create_vm::CreateVm;
 use self::destroy_vm::DestroyVm;
 use self::edit_file::EditFile;
@@ -24,7 +28,9 @@ use self::run_vm::RunVm;
 use self::set_actions::SetActions;
 use self::shell::Shell;
 use self::show_preview::ShowPreview;
+use self::spawn_agent::SpawnAgent;
 use self::write_file::WriteFile;
+use super::Agent;
 use crate::llm::{FunctionCall, ToolCall, ToolDefinition};
 use crate::node::Folder;
 use crate::session::{Environment, FileDiff, Sandbox, Session, SessionError};
@@ -51,6 +57,8 @@ pub enum ToolError {
     AmbiguousMatch(usize),
     #[error("more than one action is labelled {0}")]
     DuplicateAction(String),
+    #[error("{0} is not one of the models listed for spawn_agent")]
+    UnknownModel(String),
     #[error(transparent)]
     Session(#[from] SessionError),
 }
@@ -106,15 +114,33 @@ fn booted(failures: &[McpFailure]) -> Outcome {
     Outcome::text(output)
 }
 
+#[derive(Clone, Copy)]
+pub struct Scope {
+    pub depth: usize,
+    pub limit: usize,
+}
+
+pub struct Caller<'a> {
+    pub agent: &'a Agent,
+    pub session: &'a Session,
+    pub id: Uuid,
+    pub scope: Scope,
+}
+
 pub trait Tool<E>: Send + Sync + 'static {
     const NAME: &'static str;
     const DESCRIPTION: &'static str;
+    const PARALLEL: bool = false;
 
     type Arguments: DeserializeOwned + JsonSchema + Send;
 
+    fn available(_scope: Scope) -> bool {
+        true
+    }
+
     fn run(
         &self,
-        session: &Session,
+        caller: &Caller<'_>,
         environment: &E,
         arguments: Self::Arguments,
     ) -> impl Future<Output = Result<Outcome, ToolError>> + Send;
@@ -123,11 +149,15 @@ pub trait Tool<E>: Send + Sync + 'static {
 trait ErasedTool<E>: Send + Sync {
     fn name(&self) -> &'static str;
 
+    fn parallel(&self) -> bool;
+
+    fn available(&self, scope: Scope) -> bool;
+
     fn definition(&self) -> ToolDefinition;
 
     fn call<'a>(
         &'a self,
-        session: &'a Session,
+        caller: &'a Caller<'a>,
         environment: &'a E,
         raw: &'a str,
     ) -> BoxFuture<'a, Result<Outcome, ToolError>>;
@@ -140,6 +170,14 @@ where
 {
     fn name(&self) -> &'static str {
         T::NAME
+    }
+
+    fn parallel(&self) -> bool {
+        T::PARALLEL
+    }
+
+    fn available(&self, scope: Scope) -> bool {
+        T::available(scope)
     }
 
     fn definition(&self) -> ToolDefinition {
@@ -156,11 +194,11 @@ where
 
     fn call<'a>(
         &'a self,
-        session: &'a Session,
+        caller: &'a Caller<'a>,
         environment: &'a E,
         raw: &'a str,
     ) -> BoxFuture<'a, Result<Outcome, ToolError>> {
-        Box::pin(async move { self.run(session, environment, arguments(raw)?).await })
+        Box::pin(async move { self.run(caller, environment, arguments(raw)?).await })
     }
 }
 
@@ -175,10 +213,19 @@ impl<E: Workspace> Toolbox<E> {
         Self { tools, definitions }
     }
 
-    async fn definitions(&self, environment: &E) -> Vec<ToolDefinition> {
-        self.definitions
+    fn find(&self, name: &str) -> Option<&dyn ErasedTool<E>> {
+        self.tools
             .iter()
-            .cloned()
+            .find(|tool| tool.name() == name)
+            .map(|tool| &**tool)
+    }
+
+    async fn definitions(&self, environment: &E, scope: Scope) -> Vec<ToolDefinition> {
+        self.tools
+            .iter()
+            .zip(&self.definitions)
+            .filter(|(tool, _)| tool.available(scope))
+            .map(|(_, definition)| definition.clone())
             .chain(
                 environment
                     .mcp_tools()
@@ -191,12 +238,12 @@ impl<E: Workspace> Toolbox<E> {
 
     async fn execute(
         &self,
-        session: &Session,
+        caller: &Caller<'_>,
         environment: &E,
         FunctionCall { name, arguments }: &FunctionCall,
     ) -> Result<Outcome, ToolError> {
-        if let Some(tool) = self.tools.iter().find(|tool| tool.name() == name) {
-            tool.call(session, environment, arguments).await
+        if let Some(tool) = self.find(name).filter(|tool| tool.available(caller.scope)) {
+            tool.call(caller, environment, arguments).await
         } else if let Some((server, tool)) = mcp::parse(name) {
             mcp::call(environment, server, tool, arguments).await
         } else {
@@ -223,29 +270,42 @@ impl Tools {
                 Box::new(ReadFile),
                 Box::new(WriteFile),
                 Box::new(EditFile),
+                Box::new(SpawnAgent),
+                Box::new(Ask),
             ]),
             node: Toolbox::new(vec![
                 Box::new(Shell),
                 Box::new(ReadFile),
                 Box::new(WriteFile),
                 Box::new(EditFile),
+                Box::new(SpawnAgent),
+                Box::new(Ask),
             ]),
         }
     }
 
-    pub async fn definitions(&self, session: &Session) -> Vec<ToolDefinition> {
+    pub async fn definitions(&self, session: &Session, scope: Scope) -> Vec<ToolDefinition> {
         match &session.environment {
-            Environment::Sandbox(sandbox) => self.sandbox.definitions(sandbox).await,
-            Environment::Node(folder) => self.node.definitions(folder).await,
+            Environment::Sandbox(sandbox) => self.sandbox.definitions(sandbox, scope).await,
+            Environment::Node(folder) => self.node.definitions(folder, scope).await,
         }
     }
 
-    pub async fn execute(&self, session: &Session, call: &ToolCall) -> Outcome {
-        let result = match &session.environment {
+    pub fn parallel(&self, session: &Session, call: &ToolCall) -> bool {
+        let name = &call.function.name;
+
+        match &session.environment {
+            Environment::Sandbox(_) => self.sandbox.find(name).is_some_and(ErasedTool::parallel),
+            Environment::Node(_) => self.node.find(name).is_some_and(ErasedTool::parallel),
+        }
+    }
+
+    pub async fn execute(&self, caller: &Caller<'_>, call: &ToolCall) -> Outcome {
+        let result = match &caller.session.environment {
             Environment::Sandbox(sandbox) => {
-                self.sandbox.execute(session, sandbox, &call.function).await
+                self.sandbox.execute(caller, sandbox, &call.function).await
             },
-            Environment::Node(folder) => self.node.execute(session, folder, &call.function).await,
+            Environment::Node(folder) => self.node.execute(caller, folder, &call.function).await,
         };
 
         result.unwrap_or_else(Outcome::failure)

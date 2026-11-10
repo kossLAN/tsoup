@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use schemars::JsonSchema;
 use serde::Deserialize;
 
-use super::{Outcome, Tool, ToolError};
-use crate::session::{Action, Sandbox, Session};
+use super::{Caller, Outcome, Scope, Tool, ToolError};
+use crate::session::{Action, Sandbox};
 
 pub struct SetActions;
 
@@ -22,9 +22,13 @@ They run detached like shell's background mode, while the VM runs.";
 
     type Arguments = Arguments;
 
+    fn available(scope: Scope) -> bool {
+        scope.depth == 0
+    }
+
     async fn run(
         &self,
-        session: &Session,
+        caller: &Caller<'_>,
         _environment: &Sandbox,
         Arguments { actions }: Arguments,
     ) -> Result<Outcome, ToolError> {
@@ -34,7 +38,7 @@ They run detached like shell's background mode, while the VM runs.";
             return Err(ToolError::DuplicateAction(action.label.clone()));
         }
 
-        session.set_actions(actions).await?;
+        caller.session.set_actions(actions).await?;
         Ok(Outcome::text("the user sees the actions"))
     }
 }

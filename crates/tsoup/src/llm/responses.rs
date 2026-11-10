@@ -1,3 +1,4 @@
+use std::iter;
 use std::ops::ControlFlow;
 
 use futures_util::future::BoxFuture;
@@ -6,8 +7,8 @@ use serde::{Deserialize, Serialize};
 
 use super::stream::{Collector, Data, Events};
 use super::{
-    Effort, Endpoint, LlmError, Message, OnProgress, Provider, Reply, ToolCall, ToolDefinition,
-    ToolKind, list_models, send,
+    Effort, Endpoint, LlmError, Message, Model, OnProgress, Provider, Reply, ToolCall,
+    ToolDefinition, ToolKind, list_models, send,
 };
 
 pub struct Responses(pub Endpoint);
@@ -42,6 +43,11 @@ enum Item<'a> {
         role: Role,
         content: &'a str,
     },
+    #[serde(rename = "message")]
+    Input {
+        role: Role,
+        content: Vec<InputPart<'a>>,
+    },
     FunctionCall {
         call_id: &'a str,
         name: &'a str,
@@ -59,6 +65,13 @@ enum Role {
     System,
     User,
     Assistant,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum InputPart<'a> {
+    InputText { text: &'a str },
+    InputImage { image_url: String },
 }
 
 #[derive(Serialize)]
@@ -92,7 +105,10 @@ enum StreamEvent {
     #[serde(rename = "response.function_call_arguments.delta")]
     ArgumentsDelta { output_index: usize, delta: String },
     #[serde(rename = "response.completed", alias = "response.incomplete")]
-    Completed,
+    Completed {
+        #[serde(default)]
+        response: CompletedResponse,
+    },
     #[serde(rename = "response.failed")]
     Failed { response: FailedResponse },
     #[serde(rename = "error")]
@@ -113,6 +129,17 @@ enum AddedItem {
     Other,
 }
 
+#[derive(Default, Deserialize)]
+struct CompletedResponse {
+    usage: Option<ResponseUsage>,
+}
+
+#[derive(Deserialize)]
+struct ResponseUsage {
+    input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+}
+
 #[derive(Deserialize)]
 struct FailedResponse {
     error: Option<ResponseError>,
@@ -129,9 +156,17 @@ fn items(message: &Message) -> Vec<Item<'_>> {
             role: Role::System,
             content,
         }],
-        Message::User { content } => vec![Item::Message {
+        Message::User { content, images } if images.is_empty() => vec![Item::Message {
             role: Role::User,
             content,
+        }],
+        Message::User { content, images } => vec![Item::Input {
+            role: Role::User,
+            content: iter::once(InputPart::InputText { text: content })
+                .chain(images.iter().map(|image| InputPart::InputImage {
+                    image_url: image.url(),
+                }))
+                .collect(),
         }],
         Message::Assistant {
             content,
@@ -193,14 +228,20 @@ impl StreamEvent {
                 output_index,
                 delta,
             } => collector.tool_arguments(output_index, &delta),
-            Self::Completed => return Ok(ControlFlow::Break(())),
+            Self::Completed { response } => {
+                if let Some(usage) = response.usage {
+                    collector.usage(usage.input_tokens, usage.output_tokens);
+                }
+
+                return Ok(ControlFlow::Break(()));
+            },
             Self::Failed { response } => {
-                return Err(LlmError::Remote(response.error.map_or_else(
+                return Err(LlmError::remote(response.error.map_or_else(
                     || "the response failed".to_owned(),
                     |error| error.message,
                 )));
             },
-            Self::Error { message } => return Err(LlmError::Remote(message)),
+            Self::Error { message } => return Err(LlmError::remote(message)),
             Self::ItemAdded {
                 item: AddedItem::Other,
                 ..
@@ -249,7 +290,7 @@ impl Provider for Responses {
         })
     }
 
-    fn models(&self) -> BoxFuture<'_, Result<Vec<String>, LlmError>> {
+    fn models(&self) -> BoxFuture<'_, Result<Vec<Model>, LlmError>> {
         Box::pin(list_models(self.0.bearer(Method::GET, "/models")))
     }
 }

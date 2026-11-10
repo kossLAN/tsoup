@@ -1,29 +1,34 @@
 mod entry;
 mod environment;
 mod sandbox;
+mod thread;
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
-use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::{io, mem};
 
 use serde::Serialize;
-use tokio::sync::{Mutex, RwLock, broadcast};
+use tokio::sync::{Mutex, RwLock, broadcast, oneshot};
 use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 use tsoup_proto::node::{StoredSession, valid_folder};
 use uuid::Uuid;
 
-pub use self::entry::{Action, Entry, Event, FileDiff, Record};
+pub use self::entry::{
+    Action, AgentState, AgentSummary, Context, Entry, Event, FileDiff, Question, Record,
+};
 pub use self::environment::{Environment, EnvironmentStatus, NewEnvironment};
 pub use self::sandbox::{Sandbox, WORKSPACE_DIR};
+pub use self::thread::EntryPage;
+use self::thread::{Pending, Thread};
 use crate::node::{Folder, Node, NodeError, NodeSummary};
-use crate::settings::Selection;
+use crate::settings::{ModelChoice, Selection};
 use crate::vm::Builder;
 
 const EVENT_BUFFER: usize = 256;
 const TITLE_LENGTH: usize = 60;
-const PAGE_SIZE: usize = 50;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SessionError {
@@ -31,6 +36,12 @@ pub enum SessionError {
     NotFound,
     #[error("a turn is already running")]
     Busy,
+    #[error("no such agent")]
+    NoSuchAgent,
+    #[error("the agent is not running")]
+    AgentIdle,
+    #[error("no such question is pending")]
+    NoSuchQuestion,
     #[error("no such node is connected")]
     NoSuchNode,
     #[error("a node named {0} is already connected")]
@@ -127,45 +138,128 @@ impl Events {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
-pub struct EntryPage {
-    pub start: usize,
-    pub entries: Vec<Entry>,
-}
-
-#[derive(Default)]
 struct SessionData {
     title: String,
-    entries: Vec<Entry>,
+    threads: Vec<Thread>,
+    questions: Vec<Pending>,
     actions: Vec<Action>,
     selection: Selection,
 }
 
 impl SessionData {
-    fn replay(records: &[Record]) -> Self {
-        let mut data = Self::default();
+    fn new(id: Uuid) -> Self {
+        Self {
+            title: String::new(),
+            threads: vec![Thread::main(id)],
+            questions: Vec::new(),
+            actions: Vec::new(),
+            selection: Selection::default(),
+        }
+    }
+
+    fn replay(id: Uuid, records: Vec<Record>) -> Self {
+        let mut data = Self::new(id);
 
         for record in records {
             data.apply(record);
         }
 
+        for thread in &mut data.threads {
+            if thread.running() {
+                thread.summary.state = AgentState::Stopped;
+            }
+        }
+
         data
     }
 
-    fn apply(&mut self, record: &Record) {
+    fn apply(&mut self, record: Record) -> Option<Event> {
         match record {
-            Record::Entry { entry } => {
-                if let Entry::User { text } = entry
+            Record::Entry { agent, entry } => {
+                let main = self.threads[0].summary.id;
+                let agent = agent.unwrap_or(main);
+
+                if let Entry::User { text, .. } = &entry
+                    && agent == main
                     && self.title.is_empty()
                 {
                     self.title = title(text);
                 }
 
-                self.entries.push(entry.clone());
+                let thread = self.thread_mut(agent).ok()?;
+                thread.entries.push(entry.clone());
+                Some(Event::Entry {
+                    agent,
+                    index: thread.entries.len() - 1,
+                    entry,
+                })
             },
-            Record::Actions { actions } => self.actions.clone_from(actions),
-            Record::Selection { selection } => self.selection.clone_from(selection),
+            Record::Rewind { length } => {
+                self.threads[0].entries.truncate(length);
+                Some(Event::Rewind { length })
+            },
+            Record::Agent { agent } => {
+                match self.thread_mut(agent.id) {
+                    Ok(thread) => thread.summary.clone_from(&agent),
+                    Err(_) => self.threads.push(Thread::new(agent.clone())),
+                }
+
+                Some(Event::Agent { agent })
+            },
+            Record::Actions { actions } => {
+                self.actions.clone_from(&actions);
+                Some(Event::Actions { actions })
+            },
+            Record::Selection { selection } => {
+                self.selection.clone_from(&selection);
+                Some(Event::Selection { selection })
+            },
         }
+    }
+
+    fn thread(&self, agent: Uuid) -> Result<&Thread, SessionError> {
+        self.threads
+            .iter()
+            .find(|thread| thread.summary.id == agent)
+            .ok_or(SessionError::NoSuchAgent)
+    }
+
+    fn thread_mut(&mut self, agent: Uuid) -> Result<&mut Thread, SessionError> {
+        self.threads
+            .iter_mut()
+            .find(|thread| thread.summary.id == agent)
+            .ok_or(SessionError::NoSuchAgent)
+    }
+
+    fn subtree(&self, root: Uuid) -> Vec<Uuid> {
+        let mut agents = vec![root];
+        let mut visited = 0;
+
+        while let Some(&parent) = agents.get(visited) {
+            agents.extend(
+                self.threads
+                    .iter()
+                    .filter(|thread| thread.summary.parent == Some(parent))
+                    .map(|thread| thread.summary.id),
+            );
+            visited += 1;
+        }
+
+        agents
+    }
+
+    fn agents(&self) -> Vec<AgentSummary> {
+        self.threads[1..]
+            .iter()
+            .map(|thread| thread.summary.clone())
+            .collect()
+    }
+
+    fn questions(&self) -> Vec<Question> {
+        self.questions
+            .iter()
+            .map(|pending| pending.question.clone())
+            .collect()
     }
 }
 
@@ -298,12 +392,7 @@ impl Sessions {
             },
         };
 
-        let session = Arc::new(Session::new(
-            id,
-            environment,
-            SessionData::default(),
-            events,
-        ));
+        let session = Arc::new(Session::new(id, environment, SessionData::new(id), events));
         session.select(selection).await?;
         self.insert(Arc::clone(&session)).await;
         Ok(session)
@@ -427,7 +516,7 @@ impl Session {
         environment: Environment,
         events: Events,
     ) -> Result<Self, SessionError> {
-        let data = SessionData::replay(&environment.records(id).await?);
+        let data = SessionData::replay(id, environment.records(id).await?);
         Ok(Self::new(id, environment, data, events))
     }
 
@@ -447,35 +536,41 @@ impl Session {
         }
     }
 
-    pub async fn entries(&self) -> Vec<Entry> {
-        self.data.lock().await.entries.clone()
+    pub async fn entries(&self, agent: Uuid) -> Result<Vec<Entry>, SessionError> {
+        Ok(self.data.lock().await.thread(agent)?.entries.clone())
     }
 
-    pub async fn page(&self, before: usize) -> EntryPage {
-        let data = self.data.lock().await;
-        let end = before.min(data.entries.len());
-        let start = end.saturating_sub(PAGE_SIZE);
-        EntryPage {
-            start,
-            entries: data.entries[start..end].to_vec(),
-        }
+    pub async fn page(&self, agent: Uuid, before: usize) -> Result<EntryPage, SessionError> {
+        Ok(self.data.lock().await.thread(agent)?.page(before))
     }
 
-    pub async fn push(&self, entry: Entry) -> Result<(), SessionError> {
-        self.record(Record::Entry { entry }).await
+    pub async fn push(&self, agent: Uuid, entry: Entry) -> Result<(), SessionError> {
+        let mut data = self.data.lock().await;
+        data.thread(agent)?;
+        let agent = (agent != self.id).then_some(agent);
+        self.record(&mut data, Record::Entry { agent, entry }).await
+    }
+
+    pub async fn rewind(&self, length: usize) -> Result<(), SessionError> {
+        let mut data = self.data.lock().await;
+        self.record(&mut data, Record::Rewind { length }).await
     }
 
     pub async fn set_actions(&self, actions: Vec<Action>) -> Result<(), SessionError> {
-        self.record(Record::Actions { actions }).await
+        let mut data = self.data.lock().await;
+        self.record(&mut data, Record::Actions { actions }).await
     }
 
     pub async fn select(&self, selection: Selection) -> Result<(), SessionError> {
-        self.record(Record::Selection { selection }).await
+        let mut data = self.data.lock().await;
+        self.record(&mut data, Record::Selection { selection })
+            .await
     }
 
     pub async fn selection(&self) -> Selection {
         self.data.lock().await.selection.clone()
     }
+
     pub async fn action(&self, label: &str) -> Option<Action> {
         self.data
             .lock()
@@ -486,6 +581,150 @@ impl Session {
             .cloned()
     }
 
+    pub async fn model(&self, agent: Uuid) -> Result<Option<ModelChoice>, SessionError> {
+        Ok(self.data.lock().await.thread(agent)?.summary.model.clone())
+    }
+
+    pub async fn spawn_agent(
+        &self,
+        parent: Uuid,
+        name: String,
+        model: Option<ModelChoice>,
+    ) -> Result<(Uuid, CancellationToken), SessionError> {
+        let mut data = self.data.lock().await;
+        data.thread(parent)?;
+
+        let agent = AgentSummary {
+            id: Uuid::now_v7(),
+            parent: Some(parent),
+            name,
+            state: AgentState::Running,
+            model,
+        };
+        let id = agent.id;
+        self.record(&mut data, Record::Agent { agent }).await?;
+        Ok((id, data.thread(id)?.stop.clone()))
+    }
+
+    pub async fn finish_agent(&self, agent: Uuid, state: AgentState) -> Result<(), SessionError> {
+        let mut data = self.data.lock().await;
+        let agent = AgentSummary {
+            state,
+            ..data.thread(agent)?.summary.clone()
+        };
+        self.record(&mut data, Record::Agent { agent }).await
+    }
+
+    pub async fn stop_agent(&self, agent: Uuid) -> Result<(), SessionError> {
+        let data = self.data.lock().await;
+        let thread = data.thread(agent)?;
+
+        if !thread.running() {
+            return Err(SessionError::AgentIdle);
+        }
+
+        thread.stop.cancel();
+        Ok(())
+    }
+
+    pub async fn steer(&self, agent: Uuid, prompt: Entry) -> Result<(), SessionError> {
+        let mut data = self.data.lock().await;
+        let thread = data.thread_mut(agent)?;
+
+        if !thread.active {
+            return Err(SessionError::AgentIdle);
+        }
+
+        thread.steering.push(prompt);
+        Ok(())
+    }
+
+    pub async fn take_steering(&self, agent: Uuid) -> Result<Vec<Entry>, SessionError> {
+        let mut data = self.data.lock().await;
+        let thread = data.thread_mut(agent)?;
+        thread.active = true;
+        Ok(mem::take(&mut thread.steering))
+    }
+
+    pub async fn rest(&self, agent: Uuid) -> Result<bool, SessionError> {
+        let mut data = self.data.lock().await;
+        let thread = data.thread_mut(agent)?;
+        thread.active = !thread.steering.is_empty();
+        Ok(!thread.active)
+    }
+
+    pub async fn settle(&self, root: Uuid) {
+        let mut data = self.data.lock().await;
+        let agents = data.subtree(root);
+
+        for thread in &mut data.threads {
+            if !agents.contains(&thread.summary.id) {
+                continue;
+            }
+
+            thread.idle();
+
+            if thread.running() {
+                thread.summary.state = AgentState::Stopped;
+                self.emit(Event::Agent {
+                    agent: thread.summary.clone(),
+                });
+            }
+        }
+
+        let asked = data.questions.len();
+        data.questions
+            .retain(|pending| !agents.contains(&pending.question.agent));
+
+        if data.questions.len() != asked {
+            self.emit(Event::Questions {
+                questions: data.questions(),
+            });
+        }
+    }
+
+    pub async fn ask(
+        &self,
+        agent: Uuid,
+        text: String,
+        options: Vec<String>,
+    ) -> Result<String, SessionError> {
+        let (reply, answer) = oneshot::channel();
+
+        {
+            let mut data = self.data.lock().await;
+            data.thread(agent)?;
+            data.questions.push(Pending {
+                question: Question {
+                    id: Uuid::now_v7(),
+                    agent,
+                    text,
+                    options,
+                },
+                reply,
+            });
+            self.emit(Event::Questions {
+                questions: data.questions(),
+            });
+        }
+
+        answer.await.map_err(|_| SessionError::NoSuchQuestion)
+    }
+
+    pub async fn answer(&self, question: Uuid, answer: String) -> Result<(), SessionError> {
+        let mut data = self.data.lock().await;
+        let index = data
+            .questions
+            .iter()
+            .position(|pending| pending.question.id == question)
+            .ok_or(SessionError::NoSuchQuestion)?;
+        let _ = data.questions.remove(index).reply.send(answer);
+        self.emit(Event::Questions {
+            questions: data.questions(),
+        });
+        Ok(())
+    }
+
     pub fn emit(&self, event: Event) {
         self.events.emit(event);
     }
@@ -493,15 +732,17 @@ impl Session {
     pub async fn subscribe(&self) -> (Event, broadcast::Receiver<Event>) {
         let data = self.data.lock().await;
         let receiver = self.events.subscribe();
-        let start = data.entries.len().saturating_sub(PAGE_SIZE);
+        let EntryPage { start, entries } = data.threads[0].tail();
         let snapshot = Event::Snapshot {
             title: data.title.clone(),
             start,
-            entries: data.entries[start..].to_vec(),
+            entries,
             actions: data.actions.clone(),
             selection: data.selection.clone(),
             environment: self.environment.status(),
             busy: self.busy().await,
+            agents: data.agents(),
+            questions: data.questions(),
         };
         (snapshot, receiver)
     }
@@ -527,15 +768,18 @@ impl Session {
             handle.abort();
             let _ = handle.await;
             self.environment.reconcile().await;
+            self.settle(self.id).await;
             self.emit(Event::TurnCancelled);
         }
     }
 
-    async fn record(&self, record: Record) -> Result<(), SessionError> {
-        let mut data = self.data.lock().await;
+    async fn record(&self, data: &mut SessionData, record: Record) -> Result<(), SessionError> {
         self.environment.append(self.id, &record).await?;
-        data.apply(&record);
-        self.emit(record.into());
+
+        if let Some(event) = data.apply(record) {
+            self.emit(event);
+        }
+
         Ok(())
     }
 

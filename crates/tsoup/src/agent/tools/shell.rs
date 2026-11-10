@@ -2,8 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tsoup_proto::Exit;
 
-use super::{Outcome, Tool, ToolError};
-use crate::session::Session;
+use super::{Caller, Outcome, Tool, ToolError};
 use crate::workspace::Workspace;
 
 const TIMEOUT_SECS: u64 = 600;
@@ -29,7 +28,7 @@ impl<E: Workspace> Tool<E> for Shell {
 
     async fn run(
         &self,
-        _session: &Session,
+        _caller: &Caller<'_>,
         environment: &E,
         Arguments {
             command,

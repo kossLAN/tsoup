@@ -1,3 +1,5 @@
+mod prompts;
+
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -9,7 +11,13 @@ use tokio::sync::RwLock;
 use tsoup_claude_code::Cli;
 use uuid::Uuid;
 
+use self::prompts::{Prompts, PromptsView};
 use crate::llm::{Anthropic, ChatCompletions, ClaudeCode, Effort, Endpoint, Provider, Responses};
+
+const DEFAULT_WINDOW: u64 = 200_000;
+const MIN_WINDOW: u64 = 1_000;
+const DEFAULT_DEPTH: usize = 3;
+const MAX_DEPTH: usize = 5;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SettingsError {
@@ -30,6 +38,53 @@ pub struct Settings {
     pub default_model: Option<ModelChoice>,
     pub last_effort: Option<Effort>,
     pub hide_thinking: bool,
+    pub prompts: Prompts,
+    pub compaction: Compaction,
+    pub subagents: Subagents,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Compaction {
+    pub auto: bool,
+    pub window: u64,
+}
+
+impl Default for Compaction {
+    fn default() -> Self {
+        Self {
+            auto: true,
+            window: DEFAULT_WINDOW,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Subagents {
+    pub enabled: bool,
+    pub depth: usize,
+    pub model: Option<ModelChoice>,
+    pub effort: Option<Effort>,
+    pub models: Vec<ModelChoice>,
+}
+
+impl Default for Subagents {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            depth: DEFAULT_DEPTH,
+            model: None,
+            effort: None,
+            models: Vec::new(),
+        }
+    }
+}
+
+impl Subagents {
+    pub const fn limit(&self) -> usize {
+        if self.enabled { self.depth } else { 0 }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -75,7 +130,7 @@ impl ProviderKind {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ModelChoice {
     pub provider: Uuid,
     pub name: String,
@@ -90,6 +145,33 @@ pub struct Selection {
 impl Settings {
     pub fn provider(&self, id: Uuid) -> Option<&ProviderSettings> {
         self.providers.iter().find(|provider| provider.id == id)
+    }
+
+    pub fn label(&self, model: &ModelChoice) -> Option<String> {
+        let provider = self.provider(model.provider)?;
+        Some(format!("{}/{}", provider.name, model.name))
+    }
+
+    pub fn subagent_model(&self, label: &str) -> Option<&ModelChoice> {
+        self.subagents
+            .models
+            .iter()
+            .find(|model| self.label(model).as_deref() == Some(label))
+    }
+
+    fn prune(&mut self) {
+        let providers: Vec<_> = self.providers.iter().map(|provider| provider.id).collect();
+        let known = |model: &ModelChoice| providers.contains(&model.provider);
+
+        self.default_model = self.default_model.take().filter(known);
+        self.subagents.model = self.subagents.model.take().filter(known);
+        let mut kept = Vec::new();
+        self.subagents.models.retain(|model| {
+            let fresh = known(model) && !kept.contains(model);
+            kept.push(model.clone());
+            fresh
+        });
+        self.subagents.depth = self.subagents.depth.clamp(1, MAX_DEPTH);
     }
 
     pub fn check(&self, model: &ModelChoice) -> Result<(), SettingsError> {
@@ -146,6 +228,9 @@ pub struct SettingsView {
     pub default_model: Option<ModelChoice>,
     pub last_effort: Option<Effort>,
     pub hide_thinking: bool,
+    pub prompts: PromptsView,
+    pub compaction: Compaction,
+    pub subagents: Subagents,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -178,6 +263,9 @@ impl From<&Settings> for SettingsView {
             default_model: settings.default_model.clone(),
             last_effort: settings.last_effort,
             hide_thinking: settings.hide_thinking,
+            prompts: settings.prompts.view(),
+            compaction: settings.compaction,
+            subagents: settings.subagents.clone(),
         }
     }
 }
@@ -187,6 +275,9 @@ pub struct SettingsPatch {
     pub providers: Option<Vec<ProviderUpdate>>,
     pub default_model: Option<ModelChoice>,
     pub hide_thinking: Option<bool>,
+    pub prompts: Option<Prompts>,
+    pub compaction: Option<Compaction>,
+    pub subagents: Option<Subagents>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -279,12 +370,6 @@ impl SettingsStore {
                 .into_iter()
                 .map(|provider| provider.resolve(&settings))
                 .collect::<Result<_, _>>()?;
-            updated.default_model = updated.default_model.take().filter(|model| {
-                updated
-                    .providers
-                    .iter()
-                    .any(|provider| provider.id == model.provider)
-            });
         }
 
         if let Some(model) = patch.default_model {
@@ -295,6 +380,23 @@ impl SettingsStore {
         if let Some(hide) = patch.hide_thinking {
             updated.hide_thinking = hide;
         }
+
+        if let Some(prompts) = patch.prompts {
+            updated.prompts = prompts.normalized();
+        }
+
+        if let Some(compaction) = patch.compaction {
+            updated.compaction = Compaction {
+                window: compaction.window.max(MIN_WINDOW),
+                ..compaction
+            };
+        }
+
+        if let Some(subagents) = patch.subagents {
+            updated.subagents = subagents;
+        }
+
+        updated.prune();
 
         self.save(&updated).await?;
 

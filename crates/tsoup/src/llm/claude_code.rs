@@ -8,9 +8,12 @@ use tsoup_claude_code::{
     SdkServer, UserInput,
 };
 
-use super::anthropic::StreamEvent;
+use super::anthropic::{ImageSource, StreamEvent};
 use super::stream::Collector;
-use super::{Effort, LlmError, Message, OnProgress, Provider, Reply, ToolDefinition, system};
+use super::{
+    Effort, Image, LlmError, Message, Model, OnProgress, Provider, Reply, ToolDefinition,
+    overflows, system,
+};
 
 const SERVER: &str = "tsoup";
 const INTRO: &str =
@@ -19,15 +22,16 @@ const INTRO: &str =
 pub struct ClaudeCode(pub Arc<Cli>);
 
 #[derive(Serialize)]
-#[serde(tag = "type", rename = "text")]
-struct TextBlock {
-    text: String,
+#[serde(tag = "type", rename_all = "snake_case")]
+enum Block<'a> {
+    Text { text: String },
+    Image { source: ImageSource<'a> },
 }
 
 fn tagged(message: &Message) -> Option<String> {
     match message {
         Message::System { .. } => None,
-        Message::User { content } => Some(format!("<user>\n{content}\n</user>")),
+        Message::User { content, .. } => Some(format!("<user>\n{content}\n</user>")),
         Message::Assistant {
             content,
             tool_calls,
@@ -53,11 +57,34 @@ fn tagged(message: &Message) -> Option<String> {
     }
 }
 
-fn content(messages: &[Message]) -> Vec<TextBlock> {
-    iter::once(INTRO.to_owned())
-        .chain(messages.iter().filter_map(tagged))
-        .map(|text| TextBlock { text })
-        .collect()
+fn failed(message: String) -> LlmError {
+    if overflows(&message) {
+        LlmError::Overflow
+    } else {
+        ClaudeCodeError::Failed(message).into()
+    }
+}
+
+fn images(message: &Message) -> &[Image] {
+    match message {
+        Message::User { images, .. } => images,
+        _ => &[],
+    }
+}
+
+fn content(messages: &[Message]) -> Vec<Block<'_>> {
+    iter::once(Block::Text {
+        text: INTRO.to_owned(),
+    })
+    .chain(messages.iter().flat_map(|message| {
+        tagged(message)
+            .map(|text| Block::Text { text })
+            .into_iter()
+            .chain(images(message).iter().map(|image| Block::Image {
+                source: image.into(),
+            }))
+    }))
+    .collect()
 }
 
 impl Provider for ClaudeCode {
@@ -123,9 +150,9 @@ impl Provider for ClaudeCode {
                     },
                     Output::ControlResponse {
                         response: ControlResponse::Error { error, .. },
-                    } => return Err(ClaudeCodeError::Failed(error).into()),
+                    } => return Err(failed(error)),
                     Output::Finished(finished) => match finished.failure() {
-                        Some(failure) => return Err(ClaudeCodeError::Failed(failure).into()),
+                        Some(failure) => return Err(failed(failure)),
                         None => break,
                     },
                     _ => {},
@@ -136,7 +163,16 @@ impl Provider for ClaudeCode {
         })
     }
 
-    fn models(&self) -> BoxFuture<'_, Result<Vec<String>, LlmError>> {
-        Box::pin(async move { Ok(self.0.models().await?) })
+    fn models(&self) -> BoxFuture<'_, Result<Vec<Model>, LlmError>> {
+        Box::pin(async move {
+            let models = self.0.models().await?;
+            Ok(models
+                .into_iter()
+                .map(|name| Model {
+                    name,
+                    context: None,
+                })
+                .collect())
+        })
     }
 }

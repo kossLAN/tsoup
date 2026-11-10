@@ -1,21 +1,26 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
+use uuid::Uuid;
 
 use super::EnvironmentStatus;
-use crate::llm::{Progress, ToolCall};
-use crate::settings::Selection;
+use crate::llm::{Image, Progress, ToolCall};
+use crate::settings::{ModelChoice, Selection};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Entry {
     User {
         text: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<Image>,
     },
     Assistant {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         thinking: Option<String>,
         text: Option<String>,
         tool_calls: Vec<ToolCall>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        context: Option<Context>,
     },
     Tool {
         call_id: String,
@@ -23,6 +28,15 @@ pub enum Entry {
         error: bool,
         diff: Option<FileDiff>,
     },
+    Compaction {
+        summary: String,
+    },
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+pub struct Context {
+    pub used: u64,
+    pub window: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -39,12 +53,53 @@ pub struct Action {
     pub command: String,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentState {
+    Running,
+    Finished,
+    Failed,
+    Stopped,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AgentSummary {
+    pub id: Uuid,
+    pub parent: Option<Uuid>,
+    pub name: String,
+    pub state: AgentState,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<ModelChoice>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Question {
+    pub id: Uuid,
+    pub agent: Uuid,
+    pub text: String,
+    pub options: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Record {
-    Entry { entry: Entry },
-    Actions { actions: Vec<Action> },
-    Selection { selection: Selection },
+    Entry {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        agent: Option<Uuid>,
+        entry: Entry,
+    },
+    Rewind {
+        length: usize,
+    },
+    Agent {
+        agent: AgentSummary,
+    },
+    Actions {
+        actions: Vec<Action>,
+    },
+    Selection {
+        selection: Selection,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -58,8 +113,12 @@ pub enum Event {
         selection: Selection,
         environment: EnvironmentStatus,
         busy: bool,
+        agents: Vec<AgentSummary>,
+        questions: Vec<Question>,
     },
     Entry {
+        agent: Uuid,
+        index: usize,
         entry: Entry,
     },
     TurnStarted,
@@ -78,16 +137,19 @@ pub enum Event {
         selection: Selection,
     },
     Progress {
+        agent: Uuid,
         progress: Progress,
     },
-}
-
-impl From<Record> for Event {
-    fn from(record: Record) -> Self {
-        match record {
-            Record::Entry { entry } => Self::Entry { entry },
-            Record::Actions { actions } => Self::Actions { actions },
-            Record::Selection { selection } => Self::Selection { selection },
-        }
-    }
+    Agent {
+        agent: AgentSummary,
+    },
+    Questions {
+        questions: Vec<Question>,
+    },
+    Rewind {
+        length: usize,
+    },
+    Compacting {
+        agent: Uuid,
+    },
 }

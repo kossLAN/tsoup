@@ -30,14 +30,43 @@ export type FileDiff = {
 };
 
 export type Entry =
-	| { kind: 'user'; text: string }
+	| { kind: 'user'; text: string; images?: Image[] }
 	| {
 			kind: 'assistant';
 			thinking?: string;
 			text: string | null;
 			tool_calls: ToolCall[];
+			context?: Context;
 	  }
-	| { kind: 'tool'; call_id: string; output: string; error: boolean; diff: FileDiff | null };
+	| { kind: 'tool'; call_id: string; output: string; error: boolean; diff: FileDiff | null }
+	| { kind: 'compaction'; summary: string };
+
+export type Image = {
+	media_type: string;
+	data: string;
+};
+
+export type Context = {
+	used: number;
+	window: number;
+};
+
+export type AgentState = 'running' | 'finished' | 'failed' | 'stopped';
+
+export type AgentSummary = {
+	id: string;
+	parent: string | null;
+	name: string;
+	state: AgentState;
+	model?: ModelChoice;
+};
+
+export type Question = {
+	id: string;
+	agent: string;
+	text: string;
+	options: string[];
+};
 
 export type Preview = {
 	name: string;
@@ -69,8 +98,10 @@ export type SessionEvent =
 			selection: Selection;
 			environment: EnvironmentStatus;
 			busy: boolean;
+			agents: AgentSummary[];
+			questions: Question[];
 	  }
-	| { type: 'entry'; entry: Entry }
+	| { type: 'entry'; agent: string; index: number; entry: Entry }
 	| { type: 'turn_started' }
 	| { type: 'turn_finished' }
 	| { type: 'turn_failed'; message: string }
@@ -78,7 +109,11 @@ export type SessionEvent =
 	| { type: 'environment'; environment: EnvironmentStatus }
 	| { type: 'actions'; actions: Action[] }
 	| { type: 'selection'; selection: Selection }
-	| { type: 'progress'; progress: Progress };
+	| { type: 'progress'; agent: string; progress: Progress }
+	| { type: 'agent'; agent: AgentSummary }
+	| { type: 'questions'; questions: Question[] }
+	| { type: 'rewind'; length: number }
+	| { type: 'compacting'; agent: string };
 
 export type Progress =
 	| { kind: 'thinking'; text: string }
@@ -117,9 +152,12 @@ export async function listFolders(node: string): Promise<string[]> {
 export async function createSession(
 	environment: NewEnvironment,
 	selection: Selection,
-	message: string
+	message: string,
+	images: Image[] = []
 ): Promise<SessionSummary> {
-	return (await request('POST', '/api/sessions', { environment, selection, message })).json();
+	return (
+		await request('POST', '/api/sessions', { environment, selection, message, images })
+	).json();
 }
 
 export async function patchSession(id: string, patch: { selection?: Selection }): Promise<void> {
@@ -135,16 +173,46 @@ export type EntryPage = {
 	entries: Entry[];
 };
 
-export async function listEntries(id: string, before: number): Promise<EntryPage> {
-	return (await request('GET', `/api/sessions/${id}/entries?before=${before}`)).json();
+export async function listEntries(
+	id: string,
+	before: number,
+	agent: string | null = null
+): Promise<EntryPage> {
+	const query = agent ? `before=${before}&agent=${agent}` : `before=${before}`;
+	return (await request('GET', `/api/sessions/${id}/entries?${query}`)).json();
 }
 
-export async function startTurn(id: string, content: string): Promise<void> {
-	await request('POST', `/api/sessions/${id}/turns`, { content });
+export async function startTurn(id: string, content: string, images: Image[] = []): Promise<void> {
+	await request('POST', `/api/sessions/${id}/turns`, { content, images });
 }
 
 export async function cancelTurn(id: string): Promise<void> {
 	await request('DELETE', `/api/sessions/${id}/turn`);
+}
+
+export async function compactSession(id: string): Promise<void> {
+	await request('POST', `/api/sessions/${id}/compact`);
+}
+
+export async function regenerate(id: string): Promise<void> {
+	await request('POST', `/api/sessions/${id}/regenerate`);
+}
+
+export async function steerAgent(
+	id: string,
+	agent: string,
+	content: string,
+	images: Image[] = []
+): Promise<void> {
+	await request('POST', `/api/sessions/${id}/agents/${agent}/messages`, { content, images });
+}
+
+export async function stopAgent(id: string, agent: string): Promise<void> {
+	await request('DELETE', `/api/sessions/${id}/agents/${agent}`);
+}
+
+export async function answerQuestion(id: string, question: string, answer: string): Promise<void> {
+	await request('POST', `/api/sessions/${id}/questions/${question}`, { answer });
 }
 
 export async function startVm(id: string): Promise<void> {
@@ -198,6 +266,27 @@ export type Settings = {
 	default_model: ModelChoice | null;
 	last_effort: Effort | null;
 	hide_thinking: boolean;
+	prompts: { sandbox: Prompt; node: Prompt; subagent: Prompt };
+	subagents: Subagents;
+	compaction: Compaction;
+};
+
+export type Prompt = {
+	text: string;
+	default: string;
+};
+
+export type Compaction = {
+	auto: boolean;
+	window: number;
+};
+
+export type Subagents = {
+	enabled: boolean;
+	depth: number;
+	model: ModelChoice | null;
+	effort: Effort | null;
+	models: ModelChoice[];
 };
 
 export type ProviderUpdate = {
@@ -212,6 +301,9 @@ export type SettingsPatch = {
 	providers?: ProviderUpdate[];
 	default_model?: ModelChoice;
 	hide_thinking?: boolean;
+	prompts?: { sandbox: string | null; node: string | null; subagent: string | null };
+	subagents?: Subagents;
+	compaction?: Compaction;
 };
 
 export async function getSettings(): Promise<Settings> {

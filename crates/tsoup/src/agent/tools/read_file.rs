@@ -2,8 +2,7 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 use tsoup_proto::MAX_OUTPUT;
 
-use super::{Outcome, Tool, ToolError};
-use crate::session::Session;
+use super::{Caller, Outcome, Tool, ToolError};
 use crate::workspace::Workspace;
 
 pub struct ReadFile;
@@ -22,7 +21,7 @@ impl<E: Workspace> Tool<E> for ReadFile {
 
     async fn run(
         &self,
-        _session: &Session,
+        _caller: &Caller<'_>,
         environment: &E,
         Arguments { path }: Arguments,
     ) -> Result<Outcome, ToolError> {

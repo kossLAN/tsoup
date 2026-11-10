@@ -22,7 +22,7 @@
 </script>
 
 {#if settings}
-	<div class="w-full max-w-170 px-6 py-6">
+	<div class="mx-auto w-full max-w-170 px-6 py-6">
 		<div class="pb-3 pl-1">
 			<h2 class="text-title font-medium">General</h2>
 			<p class="text-secondary">How sessions look and behave</p>

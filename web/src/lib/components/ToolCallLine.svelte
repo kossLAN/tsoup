@@ -25,7 +25,9 @@
 		run_vm: ['starting the vm', 'started the vm'],
 		destroy_vm: ['destroying the vm', 'destroyed the vm'],
 		show_preview: ['showing a preview', 'showed a preview'],
-		set_actions: ['setting actions', 'set actions']
+		set_actions: ['setting actions', 'set actions'],
+		spawn_agent: ['running agent', 'ran agent'],
+		ask: ['asking', 'asked']
 	};
 
 	const running = $derived(!result && pending);
@@ -52,6 +54,8 @@
 		if (typeof args.path === 'string') return args.path;
 		if (typeof args.url === 'string') return args.url;
 		if (typeof args.port === 'number') return `port ${args.port}`;
+		if (typeof args.name === 'string') return args.name;
+		if (typeof args.question === 'string') return args.question;
 		return '';
 	});
 
@@ -60,6 +64,8 @@
 			return args.module;
 		}
 		if (call.function.name === 'shell' && typeof args.command === 'string') return args.command;
+		if (typeof args.prompt === 'string') return args.prompt;
+		if (typeof args.question === 'string') return args.question;
 		return null;
 	});
 </script>

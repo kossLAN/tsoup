@@ -1,33 +1,26 @@
+mod compact;
+mod conversation;
+mod prompt;
 mod tools;
 
+use std::collections::HashMap;
+use std::collections::hash_map::Entry as Listing;
 use std::sync::Arc;
 
+use futures_util::future::join_all;
 use reqwest::Client;
-use tokio::sync::OnceCell;
+use tokio::sync::{Mutex, OnceCell};
 use tsoup_claude_code::Cli;
+use uuid::Uuid;
 
-use self::tools::Tools;
-use crate::llm::{LlmError, Message};
-use crate::node::Folder;
-use crate::session::{Entry, Environment, Event, Session, SessionError};
-use crate::settings::{ProviderSettings, SettingsStore};
+use self::conversation::{context, conversation};
+use self::tools::{Caller, Scope, Tools};
+use crate::llm::{Effort, LlmError, Model, Provider};
+use crate::session::{Context, Entry, Environment, Event, Session, SessionError};
+use crate::settings::{ProviderSettings, Settings, SettingsStore};
 use crate::vm::describe;
 
-const SANDBOX_PROMPT: &str = "You are a coding agent working in a session workspace.
-The workspace is at /workspace, the working directory of every tool, and persists for the whole session.
-read_file, write_file and edit_file work on the workspace directly and need no VM.
-To run anything, call create_vm with a NixOS module that installs what you need, then use shell.
-The VM is a headless NixOS microVM, and the user always has a terminal into it in their preview pane.
-create_vm's modules argument adds optional modules, such as a desktop or a website preview,
-pick only the ones the task needs.
-Once the app works, call set_actions with a Run button so the user can start it again themselves.
-MCP servers in the VM appear as mcp__<server>__<tool> tools while the VM runs.
-The VM is ephemeral: everything outside /workspace is lost when it is destroyed or replaced.
-Calling create_vm again rebuilds the VM from a new module,
-so add packages that way instead of installing them imperatively.
-To start a VM that is not running without rebuilding it, call run_vm.";
-
-const INTERRUPTED: &str = "the tool call was interrupted before it finished";
+const AUTO_COMPACT_PERCENT: u64 = 80;
 
 #[derive(Debug, thiserror::Error)]
 enum TurnError {
@@ -39,6 +32,10 @@ enum TurnError {
     NoModel,
     #[error("the selected model's provider was removed, choose another model")]
     MissingProvider,
+    #[error("the model returned no summary to compact the conversation with")]
+    NoSummary,
+    #[error("there is no reply to regenerate")]
+    NoReply,
 }
 
 pub struct Agent {
@@ -47,6 +44,23 @@ pub struct Agent {
     settings: Arc<SettingsStore>,
     tools: Tools,
     modules: OnceCell<String>,
+    catalog: Mutex<HashMap<Uuid, Vec<Model>>>,
+}
+
+struct Turn {
+    llm: Box<dyn Provider>,
+    model: String,
+    effort: Option<Effort>,
+    system: String,
+    window: u64,
+    auto: bool,
+    scope: Scope,
+}
+
+impl Turn {
+    const fn full(&self, context: Context) -> bool {
+        self.auto && context.used * 100 >= self.window * AUTO_COMPACT_PERCENT
+    }
 }
 
 impl Agent {
@@ -57,160 +71,266 @@ impl Agent {
             settings,
             tools: Tools::new(),
             modules: OnceCell::new(),
+            catalog: Mutex::default(),
         }
     }
 
     pub async fn models(&self, provider: &ProviderSettings) -> Result<Vec<String>, LlmError> {
-        provider.connect(&self.http, &self.cli).models().await
+        let models = provider.connect(&self.http, &self.cli).models().await?;
+        let names = models.iter().map(|model| model.name.clone()).collect();
+        self.catalog.lock().await.insert(provider.id, models);
+        Ok(names)
     }
 
-    pub async fn run_turn(self: Arc<Self>, session: Arc<Session>, text: String) {
-        session.emit(Event::TurnStarted);
-
-        match self.turn(&session, text).await {
-            Ok(()) => session.emit(Event::TurnFinished),
-            Err(error) => {
-                tracing::warn!(session = %session.id, %error, "a turn failed");
-                session.emit(Event::TurnFailed {
-                    message: error.to_string(),
-                });
-            },
-        }
+    pub async fn run_turn(self: Arc<Self>, session: Arc<Session>, prompt: Entry) {
+        let turn = async {
+            let turn = self.prepare(&session, session.id, 0).await?;
+            session.push(session.id, prompt).await?;
+            self.drive(&session, session.id, &turn).await?;
+            Ok(())
+        };
+        supervise(&session, turn).await;
     }
 
-    async fn turn(&self, session: &Session, text: String) -> Result<(), TurnError> {
+    pub async fn run_regeneration(self: Arc<Self>, session: Arc<Session>) {
+        let regeneration = async {
+            let turn = self.prepare(&session, session.id, 0).await?;
+            let entries = session.entries(session.id).await?;
+
+            let Some(Entry::Assistant { tool_calls, .. }) = entries.last() else {
+                return Err(TurnError::NoReply);
+            };
+
+            if !tool_calls.is_empty() {
+                return Err(TurnError::NoReply);
+            }
+
+            session.rewind(entries.len() - 1).await?;
+            self.drive(&session, session.id, &turn).await?;
+            Ok(())
+        };
+        supervise(&session, regeneration).await;
+    }
+
+    pub async fn run_compaction(self: Arc<Self>, session: Arc<Session>) {
+        let compaction = async {
+            let turn = self.prepare(&session, session.id, 0).await?;
+            self.compact(&session, session.id, &turn).await
+        };
+        supervise(&session, compaction).await;
+    }
+
+    async fn run(
+        &self,
+        session: &Session,
+        id: Uuid,
+        depth: usize,
+    ) -> Result<Option<String>, TurnError> {
+        let turn = self.prepare(session, id, depth).await?;
+        self.drive(session, id, &turn).await
+    }
+
+    async fn prepare(&self, session: &Session, id: Uuid, depth: usize) -> Result<Turn, TurnError> {
         let settings = self.settings.get().await;
         let selection = session.selection().await;
-        let model = selection
-            .model
+        let scope = Scope {
+            depth,
+            limit: settings.subagents.limit(),
+        };
+        let effort = match settings.subagents.effort {
+            Some(effort) if depth > 0 => Some(effort),
+            _ => selection.effort,
+        };
+        let model = session
+            .model(id)
+            .await?
+            .or(selection.model)
             .or_else(|| settings.default_model.clone())
             .ok_or(TurnError::NoModel)?;
-        let llm = settings
+        let provider = settings
             .provider(model.provider)
-            .ok_or(TurnError::MissingProvider)?
-            .connect(&self.http, &self.cli);
+            .ok_or(TurnError::MissingProvider)?;
+        let llm = provider.connect(&self.http, &self.cli);
+        let window = self
+            .window(provider.id, &*llm, &model.name)
+            .await
+            .unwrap_or(settings.compaction.window);
+        let system = self.system(&settings, &session.environment, scope).await;
 
-        session.push(Entry::User { text }).await?;
-        let system = self.system_prompt(&session.environment).await;
+        Ok(Turn {
+            llm,
+            model: model.name,
+            effort,
+            system,
+            window,
+            auto: settings.compaction.auto,
+            scope,
+        })
+    }
+
+    async fn drive(
+        &self,
+        session: &Session,
+        id: Uuid,
+        turn: &Turn,
+    ) -> Result<Option<String>, TurnError> {
+        let caller = Caller {
+            agent: self,
+            session,
+            id,
+            scope: turn.scope,
+        };
+        let mut recovered = false;
 
         loop {
-            let messages = conversation(&system, &session.entries().await);
-            let tools = self.tools.definitions(session).await;
-            let report = |progress| session.emit(Event::Progress { progress });
-            let reply = llm
-                .complete(&model.name, selection.effort, &messages, &tools, &report)
-                .await?;
+            for prompt in session.take_steering(id).await? {
+                session.push(id, prompt).await?;
+            }
+
+            let entries = session.entries(id).await?;
+
+            if context(&entries).is_some_and(|context| turn.full(context)) {
+                self.compact(session, id, turn).await?;
+                continue;
+            }
+
+            let messages = conversation(&turn.system, &entries);
+            let tools = self.tools.definitions(session, turn.scope).await;
+            let report = |progress| {
+                session.emit(Event::Progress {
+                    agent: id,
+                    progress,
+                });
+            };
+            let reply = match turn
+                .llm
+                .complete(&turn.model, turn.effort, &messages, &tools, &report)
+                .await
+            {
+                Err(LlmError::Overflow) if !recovered => {
+                    recovered = true;
+                    self.compact(session, id, turn).await?;
+                    continue;
+                },
+                reply => reply?,
+            };
+            recovered = false;
+
             let calls = reply.tool_calls.clone();
+            let text = reply.content.clone();
             session
-                .push(Entry::Assistant {
-                    thinking: reply.thinking,
-                    text: reply.content,
-                    tool_calls: reply.tool_calls,
-                })
+                .push(
+                    id,
+                    Entry::Assistant {
+                        thinking: reply.thinking,
+                        text: reply.content,
+                        tool_calls: reply.tool_calls,
+                        context: reply.usage.map(|usage| Context {
+                            used: usage.input + usage.output,
+                            window: turn.window,
+                        }),
+                    },
+                )
                 .await?;
 
             if calls.is_empty() {
-                return Ok(());
+                if session.rest(id).await? {
+                    return Ok(text);
+                }
+
+                continue;
             }
 
-            for call in calls {
-                let outcome = self.tools.execute(session, &call).await;
-                session
-                    .push(Entry::Tool {
-                        call_id: call.id,
-                        output: outcome.output,
-                        error: outcome.error,
-                        diff: outcome.diff,
-                    })
-                    .await?;
+            let batches = calls.chunk_by(|left, right| {
+                self.tools.parallel(session, left) && self.tools.parallel(session, right)
+            });
+
+            for batch in batches {
+                let outcomes =
+                    join_all(batch.iter().map(|call| self.tools.execute(&caller, call))).await;
+
+                for (call, outcome) in batch.iter().zip(outcomes) {
+                    session
+                        .push(
+                            id,
+                            Entry::Tool {
+                                call_id: call.id.clone(),
+                                output: outcome.output,
+                                error: outcome.error,
+                                diff: outcome.diff,
+                            },
+                        )
+                        .await?;
+                }
             }
         }
     }
 
-    async fn system_prompt(&self, environment: &Environment) -> String {
-        match environment {
-            Environment::Sandbox(_) => self.sandbox_prompt().await,
-            Environment::Node(folder) => node_prompt(folder),
-        }
-    }
+    async fn window(&self, provider: Uuid, llm: &dyn Provider, model: &str) -> Option<u64> {
+        let mut catalog = self.catalog.lock().await;
 
-    async fn sandbox_prompt(&self) -> String {
-        match self
-            .modules
-            .get_or_try_init(describe)
-            .await
-            .map(|modules| modules.trim_end())
-        {
-            Ok("") => SANDBOX_PROMPT.to_owned(),
-            Ok(modules) => {
-                format!(
-                    "{SANDBOX_PROMPT}\nThe modules for create_vm's modules argument:\n{modules}"
-                )
+        let models = match catalog.entry(provider) {
+            Listing::Occupied(listing) => listing.into_mut(),
+            Listing::Vacant(listing) => {
+                listing.insert(llm.models().await.unwrap_or_else(|error| {
+                    tracing::warn!(%error, "listing models for their context windows");
+                    Vec::new()
+                }))
             },
+        };
+
+        models.iter().find(|listed| listed.name == model)?.context
+    }
+
+    async fn system(&self, settings: &Settings, environment: &Environment, scope: Scope) -> String {
+        let prompts = &settings.prompts;
+        let mut system = match environment {
+            Environment::Sandbox(_) => prompt::sandbox(prompts.sandbox(), self.modules().await),
+            Environment::Node(folder) => prompt::node(prompts.node(), folder),
+        };
+
+        if scope.depth > 0 {
+            system.push_str("\n\n");
+            system.push_str(prompts.subagent());
+        }
+
+        let models: Vec<_> = settings
+            .subagents
+            .models
+            .iter()
+            .filter_map(|model| settings.label(model))
+            .collect();
+
+        if scope.depth < scope.limit && !models.is_empty() {
+            system.push_str("\n\n");
+            system.push_str(&prompt::models(&models));
+        }
+
+        system
+    }
+
+    async fn modules(&self) -> &str {
+        match self.modules.get_or_try_init(describe).await {
+            Ok(modules) => modules.trim_end(),
             Err(error) => {
                 tracing::warn!(%error, "listing the VM modules");
-                SANDBOX_PROMPT.to_owned()
+                ""
             },
         }
     }
 }
 
-fn node_prompt(folder: &Folder) -> String {
-    format!(
-        "You are a coding agent working directly on the machine {name}, outside any sandbox.
-The working directory is {directory}, shell runs commands there with sh -c.
-read_file, write_file and edit_file resolve relative paths against it and accept absolute paths.
-MCP servers on the machine appear as mcp__<server>__<tool> tools.
-Everything you do happens on the real machine and persists,
-so ask the user before doing anything destructive or hard to undo.",
-        name = folder.node.name,
-        directory = folder.path().display(),
-    )
-}
+async fn supervise(session: &Session, turn: impl Future<Output = Result<(), TurnError>>) {
+    session.emit(Event::TurnStarted);
 
-fn conversation(system: &str, entries: &[Entry]) -> Vec<Message> {
-    let mut messages = vec![Message::System {
-        content: system.to_owned(),
-    }];
-    let mut unanswered = Vec::new();
-
-    for entry in entries {
-        match entry {
-            Entry::User { text } => {
-                interrupt(&mut messages, &mut unanswered);
-                messages.push(Message::User {
-                    content: text.clone(),
-                });
-            },
-            Entry::Assistant {
-                text, tool_calls, ..
-            } => {
-                interrupt(&mut messages, &mut unanswered);
-                unanswered.extend(tool_calls.iter().map(|call| call.id.clone()));
-                messages.push(Message::Assistant {
-                    content: text.clone(),
-                    tool_calls: tool_calls.clone(),
-                });
-            },
-            Entry::Tool {
-                call_id, output, ..
-            } => {
-                unanswered.retain(|id| id != call_id);
-                messages.push(Message::Tool {
-                    tool_call_id: call_id.clone(),
-                    content: output.clone(),
-                });
-            },
-        }
+    match turn.await {
+        Ok(()) => session.emit(Event::TurnFinished),
+        Err(error) => {
+            tracing::warn!(session = %session.id, %error, "a turn failed");
+            session.settle(session.id).await;
+            session.emit(Event::TurnFailed {
+                message: error.to_string(),
+            });
+        },
     }
-
-    interrupt(&mut messages, &mut unanswered);
-    messages
-}
-
-fn interrupt(messages: &mut Vec<Message>, unanswered: &mut Vec<String>) {
-    messages.extend(unanswered.drain(..).map(|tool_call_id| Message::Tool {
-        tool_call_id,
-        content: INTERRUPTED.to_owned(),
-    }));
 }

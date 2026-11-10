@@ -1,11 +1,13 @@
+use std::iter;
+
 use futures_util::future::BoxFuture;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
 use super::stream::{Collector, Data, Events};
 use super::{
-    Effort, Endpoint, LlmError, Message, OnProgress, Provider, Reply, ToolCall, ToolDefinition,
-    ToolKind, list_models, send,
+    Effort, Endpoint, Image, LlmError, Message, Model, OnProgress, Provider, Reply, ToolCall,
+    ToolDefinition, ToolKind, list_models, send,
 };
 
 pub struct ChatCompletions(pub Endpoint);
@@ -18,6 +20,12 @@ struct ChatRequest<'a> {
     messages: Vec<ChatMessage<'a>>,
     tools: Vec<ChatTool<'a>>,
     stream: bool,
+    stream_options: StreamOptions,
+}
+
+#[derive(Serialize)]
+struct StreamOptions {
+    include_usage: bool,
 }
 
 #[derive(Serialize)]
@@ -27,7 +35,7 @@ enum ChatMessage<'a> {
         content: &'a str,
     },
     User {
-        content: &'a str,
+        content: UserContent<'a>,
     },
     Assistant {
         content: Option<&'a str>,
@@ -40,11 +48,48 @@ enum ChatMessage<'a> {
     },
 }
 
+#[derive(Serialize)]
+#[serde(untagged)]
+enum UserContent<'a> {
+    Text(&'a str),
+    Parts(Vec<Part<'a>>),
+}
+
+#[derive(Serialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+enum Part<'a> {
+    Text { text: &'a str },
+    ImageUrl { image_url: ImageUrl },
+}
+
+#[derive(Serialize)]
+struct ImageUrl {
+    url: String,
+}
+
+impl From<&Image> for Part<'_> {
+    fn from(image: &Image) -> Self {
+        Self::ImageUrl {
+            image_url: ImageUrl { url: image.url() },
+        }
+    }
+}
+
 impl<'a> From<&'a Message> for ChatMessage<'a> {
     fn from(message: &'a Message) -> Self {
         match message {
             Message::System { content } => Self::System { content },
-            Message::User { content } => Self::User { content },
+            Message::User { content, images } => Self::User {
+                content: if images.is_empty() {
+                    UserContent::Text(content)
+                } else {
+                    UserContent::Parts(
+                        iter::once(Part::Text { text: content })
+                            .chain(images.iter().map(Part::from))
+                            .collect(),
+                    )
+                },
+            },
             Message::Assistant {
                 content,
                 tool_calls,
@@ -75,6 +120,13 @@ struct Chunk {
     #[serde(default)]
     choices: Vec<ChunkChoice>,
     error: Option<ChunkError>,
+    usage: Option<ChunkUsage>,
+}
+
+#[derive(Deserialize)]
+struct ChunkUsage {
+    prompt_tokens: Option<u64>,
+    completion_tokens: Option<u64>,
 }
 
 #[derive(Deserialize)]
@@ -163,6 +215,9 @@ impl Provider for ChatCompletions {
                         })
                         .collect(),
                     stream: true,
+                    stream_options: StreamOptions {
+                        include_usage: true,
+                    },
                 });
             let mut events = Events::new(send(request).await?);
             let mut collector = Collector::new(progress);
@@ -170,7 +225,11 @@ impl Provider for ChatCompletions {
 
             while let Some(Data::Event(chunk)) = events.next::<Chunk>().await? {
                 if let Some(error) = chunk.error {
-                    return Err(LlmError::Remote(error.message));
+                    return Err(LlmError::remote(error.message));
+                }
+
+                if let Some(usage) = chunk.usage {
+                    collector.usage(usage.prompt_tokens, usage.completion_tokens);
                 }
 
                 for choice in chunk.choices {
@@ -187,7 +246,7 @@ impl Provider for ChatCompletions {
         })
     }
 
-    fn models(&self) -> BoxFuture<'_, Result<Vec<String>, LlmError>> {
+    fn models(&self) -> BoxFuture<'_, Result<Vec<Model>, LlmError>> {
         Box::pin(list_models(self.0.bearer(Method::GET, "/models")))
     }
 }

@@ -4,7 +4,7 @@ use std::{mem, str};
 use reqwest::Response;
 use serde::de::DeserializeOwned;
 
-use super::{FunctionCall, LlmError, OnProgress, Progress, Reply, ToolCall, ToolKind};
+use super::{FunctionCall, LlmError, OnProgress, Progress, Reply, ToolCall, ToolKind, Usage};
 
 const DONE: &str = "[DONE]";
 
@@ -72,6 +72,7 @@ pub struct Collector<'a> {
     text: Part,
     thinking: Part,
     tool_calls: BTreeMap<usize, ToolCall>,
+    usage: Option<Usage>,
 }
 
 #[derive(Default)]
@@ -109,6 +110,7 @@ impl<'a> Collector<'a> {
             text: Part::default(),
             thinking: Part::default(),
             tool_calls: BTreeMap::new(),
+            usage: None,
         }
     }
 
@@ -161,11 +163,22 @@ impl<'a> Collector<'a> {
         }
     }
 
+    pub fn usage(&mut self, input: Option<u64>, output: Option<u64>) {
+        if input.is_none() && output.is_none() {
+            return;
+        }
+
+        let usage = self.usage.get_or_insert_default();
+        usage.input = input.unwrap_or(usage.input);
+        usage.output = output.unwrap_or(usage.output);
+    }
+
     pub fn finish(self) -> Reply {
         Reply {
             content: self.text.finish(),
             thinking: self.thinking.finish(),
             tool_calls: self.tool_calls.into_values().collect(),
+            usage: self.usage,
         }
     }
 }

@@ -3,7 +3,9 @@
 	import { WarningCircleIcon } from '$lib/icons';
 	import type { Draft } from '$lib/session.svelte';
 	import { tick } from 'svelte';
+	import CompactionLine from './CompactionLine.svelte';
 	import Markdown from './Markdown.svelte';
+	import ReplyActions from './ReplyActions.svelte';
 	import Spinner from './Spinner.svelte';
 	import ToolCallLine from './ToolCallLine.svelte';
 	import Working from './Working.svelte';
@@ -13,20 +15,27 @@
 		start,
 		busy,
 		draft,
+		compacting = false,
 		thinking,
 		failure,
-		onolder
+		onolder,
+		onregenerate,
+		dense = false
 	}: {
 		entries: Entry[];
 		start: number;
 		busy: boolean;
 		draft: Draft | null;
+		compacting?: boolean;
 		thinking: boolean;
 		failure: string | null;
 		onolder: () => Promise<void>;
+		onregenerate?: () => void;
+		dense?: boolean;
 	} = $props();
 
 	const activity = $derived.by(() => {
+		if (compacting) return 'Compacting';
 		if (!draft) return null;
 		if (draft.tool) return `Preparing ${draft.tool}`;
 		if (draft.text) return 'Writing';
@@ -98,18 +107,33 @@
 </script>
 
 <div class="flex-1 overflow-y-auto" bind:this={scroller} onscroll={scrolled}>
-	<div class="mx-auto flex max-w-chat flex-col gap-2.5 px-6 pt-6 pb-3">
+	<div
+		class={['mx-auto flex max-w-chat flex-col gap-2.5 pb-3', dense ? 'px-2 pt-2' : 'px-6 pt-6']}
+	>
 		{#if start > 0}
 			<div class="flex justify-center"><Spinner size={14} kind="simmer" /></div>
 		{/if}
 
 		{#each entries as entry, index (start + index)}
 			{#if entry.kind === 'user'}
-				<div
-					class="max-w-4/5 self-end bubble text-title/relaxed wrap-break-word whitespace-pre-wrap"
-				>
-					{entry.text}
-				</div>
+				{#if entry.images?.length}
+					<div class="flex max-w-4/5 flex-wrap justify-end gap-1.5 self-end">
+						{#each entry.images as image, position (position)}
+							<img
+								class="max-h-56 max-w-full rounded-control border border-light"
+								src="data:{image.media_type};base64,{image.data}"
+								alt="Attachment {position + 1}"
+							/>
+						{/each}
+					</div>
+				{/if}
+				{#if entry.text}
+					<div
+						class="max-w-4/5 self-end bubble text-title/relaxed wrap-break-word whitespace-pre-wrap"
+					>
+						{entry.text}
+					</div>
+				{/if}
 			{:else if entry.kind === 'assistant'}
 				{#if thinking && entry.thinking}
 					<Markdown text={entry.thinking} muted />
@@ -124,6 +148,16 @@
 						{/each}
 					</div>
 				{/if}
+				{#if entry.text && !entry.tool_calls.length}
+					<ReplyActions
+						text={entry.text}
+						onregenerate={!busy && index === entries.length - 1
+							? onregenerate
+							: undefined}
+					/>
+				{/if}
+			{:else if entry.kind === 'compaction'}
+				<CompactionLine summary={entry.summary} />
 			{/if}
 		{/each}
 

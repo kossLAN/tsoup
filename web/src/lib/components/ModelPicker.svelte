@@ -10,7 +10,7 @@
 		type Settings
 	} from '$lib/api';
 	import { BrainIcon, CaretDownIcon, CheckIcon, SparkleIcon, StarIcon } from '$lib/icons';
-	import { follow, tooltip } from '$lib/popup';
+	import { follow, tooltip, type Placement } from '$lib/popup';
 	import { brand } from '$lib/providers';
 	import { onMount } from 'svelte';
 	import ProviderIcon from './ProviderIcon.svelte';
@@ -20,8 +20,19 @@
 
 	let {
 		selection,
-		onchange
-	}: { selection: Selection; onchange: (selection: Selection) => void } = $props();
+		onchange,
+		placeholder,
+		placement = 'top-end',
+		effort = true,
+		starrable = true
+	}: {
+		selection: Selection;
+		onchange: (selection: Selection) => void;
+		placeholder?: string;
+		placement?: Placement;
+		effort?: boolean;
+		starrable?: boolean;
+	} = $props();
 
 	const efforts: { value: Effort | null; label: string }[] = [
 		{ value: null, label: 'Default' },
@@ -45,7 +56,9 @@
 	let stop: (() => void) | undefined;
 
 	const name = $derived(query.trim());
-	const model = $derived(selection.model ?? settings?.default_model ?? null);
+	const model = $derived(
+		selection.model ?? (placeholder === undefined ? (settings?.default_model ?? null) : null)
+	);
 	const current = $derived(
 		settings?.providers.find((provider) => provider.id === model?.provider)
 	);
@@ -79,7 +92,7 @@
 		failure = null;
 		requestAnimationFrame(() => {
 			if (!button || !popup?.matches(':popover-open')) return;
-			stop = follow(button, popup, 'top-end');
+			stop = follow(button, popup, placement);
 			input?.focus();
 		});
 
@@ -144,14 +157,14 @@
 		bind:this={button}
 		class="button h-6.5 max-w-64 min-w-0 shrink gap-1.5 px-2 text-label text-secondary hover:bg-window-text/8 hover:text-window-text"
 		popovertarget={id}
-		{@attach tooltip('Model and reasoning effort')}
+		{@attach tooltip(effort ? 'Model and reasoning effort' : 'Model')}
 	>
 		{#if model && current}
 			<ProviderIcon brand={brand(current)} size={14} />
 			<span class="truncate">{model.name}</span>
 		{:else}
 			<SparkleIcon size={14} />
-			<span class="truncate">Choose a model</span>
+			<span class="truncate">{placeholder ?? 'Choose a model'}</span>
 		{/if}
 		<CaretDownIcon size={10} />
 	</button>
@@ -203,22 +216,24 @@
 									>
 								{/if}
 							</button>
-							<button
-								class={[
-									'mr-0.5 icon-button size-6',
-									starred ? 'text-accent' : 'text-secondary',
-									!starred && option.index !== active && 'invisible'
-								]}
-								aria-label={starred
-									? 'Default for new sessions'
-									: 'Use for new sessions'}
-								aria-pressed={starred}
-								tabindex="-1"
-								onclick={() => star(option)}
-								onpointermove={() => (active = option.index)}
-							>
-								<StarIcon size={12} weight={starred ? 'fill' : 'regular'} />
-							</button>
+							{#if starrable}
+								<button
+									class={[
+										'mr-0.5 icon-button size-6',
+										starred ? 'text-accent' : 'text-secondary',
+										!starred && option.index !== active && 'invisible'
+									]}
+									aria-label={starred
+										? 'Default for new sessions'
+										: 'Use for new sessions'}
+									aria-pressed={starred}
+									tabindex="-1"
+									onclick={() => star(option)}
+									onpointermove={() => (active = option.index)}
+								>
+									<StarIcon size={12} weight={starred ? 'fill' : 'regular'} />
+								</button>
+							{/if}
 						</div>
 					{:else}
 						<p
@@ -247,27 +262,30 @@
 				a model
 			</p>
 		{/if}
-		<div class="mt-1 border-t border-light px-1 pt-2 pb-1">
-			<div class="flex items-center gap-1.5 px-1 pb-1.5 label">
-				<BrainIcon size={12} />
-				Reasoning effort
+		{#if effort}
+			<div class="mt-1 border-t border-light px-1 pt-2 pb-1">
+				<div class="flex items-center gap-1.5 px-1 pb-1.5 label">
+					<BrainIcon size={12} />
+					Reasoning effort
+				</div>
+				<div class="grid grid-cols-5 gap-0.5 rounded-input bg-alternate-base p-0.5">
+					{#each efforts as level (level.label)}
+						<button
+							class={[
+								'h-6 rounded-small text-label transition-colors',
+								level.value === selection.effort
+									? 'bg-light text-window-text'
+									: 'text-secondary hover:text-window-text'
+							]}
+							aria-pressed={level.value === selection.effort}
+							onclick={() =>
+								onchange({ model: selection.model, effort: level.value })}
+						>
+							{level.label}
+						</button>
+					{/each}
+				</div>
 			</div>
-			<div class="grid grid-cols-5 gap-0.5 rounded-input bg-alternate-base p-0.5">
-				{#each efforts as level (level.label)}
-					<button
-						class={[
-							'h-6 rounded-small text-label transition-colors',
-							level.value === selection.effort
-								? 'bg-light text-window-text'
-								: 'text-secondary hover:text-window-text'
-						]}
-						aria-pressed={level.value === selection.effort}
-						onclick={() => onchange({ model: selection.model, effort: level.value })}
-					>
-						{level.label}
-					</button>
-				{/each}
-			</div>
-		</div>
+		{/if}
 	</div>
 {/if}

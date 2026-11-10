@@ -3,20 +3,32 @@
 	import { page } from '$app/state';
 	import {
 		cancelTurn,
+		compactSession,
 		destroyVm,
 		getSettings,
 		patchSession,
+		regenerate,
 		runAction,
 		startTurn,
 		startVm,
+		type Image,
 		type Selection
 	} from '$lib/api';
 	import Composer from '$lib/components/Composer.svelte';
+	import ContextMeter from '$lib/components/ContextMeter.svelte';
 	import ModelNotice from '$lib/components/ModelNotice.svelte';
 	import ModelPicker from '$lib/components/ModelPicker.svelte';
 	import PreviewPane from '$lib/components/PreviewPane.svelte';
+	import Resizer from '$lib/components/Resizer.svelte';
+	import SidePanel from '$lib/components/SidePanel.svelte';
 	import Timeline from '$lib/components/Timeline.svelte';
-	import { DesktopTowerIcon, FolderIcon, MonitorIcon, PlayIcon } from '$lib/icons';
+	import {
+		DesktopTowerIcon,
+		FolderIcon,
+		MonitorIcon,
+		PlayIcon,
+		TreeStructureIcon
+	} from '$lib/icons';
 	import { tooltip } from '$lib/popup';
 	import { Session } from '$lib/session.svelte';
 	import { sessions } from '$lib/sessions.svelte';
@@ -26,8 +38,13 @@
 
 	const session = $derived(new Session(page.params.id ?? ''));
 	let hidden = $state(false);
+	let panel = $state(false);
+	let widths = $state({ preview: stored('preview'), activity: stored('activity') ?? 288 });
 	let failure = $state<string | null>(null);
 	let hideThinking = $state(true);
+	let asked = 0;
+
+	const activity = $derived(session.agents.length > 0 || session.questions.length > 0);
 
 	const vm = $derived(session.vm);
 	const active = $derived(vm !== null && vm.state !== 'stopped');
@@ -63,14 +80,48 @@
 		}
 	});
 
-	async function send(text: string): Promise<boolean> {
+	$effect(() => {
+		const waiting = session.questions.length;
+		if (waiting > asked) panel = true;
+		asked = waiting;
+	});
+
+	function stored(pane: string): number | null {
+		const width = Number(localStorage.getItem(`tsoup.width.${pane}`));
+		return width > 0 ? width : null;
+	}
+
+	function resize(pane: 'preview' | 'activity', width: number) {
+		widths[pane] = width;
+		localStorage.setItem(`tsoup.width.${pane}`, String(width));
+	}
+
+	async function send(text: string, images: Image[]): Promise<boolean> {
 		failure = null;
 		try {
-			await startTurn(session.id, text);
+			await startTurn(session.id, text, images);
 			return true;
 		} catch (error) {
 			failure = error instanceof Error ? error.message : String(error);
 			return false;
+		}
+	}
+
+	async function compact() {
+		failure = null;
+		try {
+			await compactSession(session.id);
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
+		}
+	}
+
+	async function redo() {
+		failure = null;
+		try {
+			await regenerate(session.id);
+		} catch (error) {
+			failure = error instanceof Error ? error.message : String(error);
 		}
 	}
 
@@ -128,21 +179,41 @@
 					<MonitorIcon size={16} />
 				</button>
 			{/if}
+			{#if activity && !panel}
+				<button
+					class="relative icon-button"
+					onclick={() => (panel = true)}
+					{@attach tooltip('Show activity')}
+				>
+					<TreeStructureIcon size={16} />
+					{#if session.questions.length}
+						<span class="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-accent"
+						></span>
+					{/if}
+				</button>
+			{/if}
 		</header>
 		{#key session}
 			<Timeline
-				entries={session.entries}
-				start={session.start}
+				entries={session.main.entries}
+				start={session.main.start}
 				busy={session.busy}
-				draft={session.draft}
+				draft={session.main.draft}
+				compacting={session.main.compacting}
 				thinking={!hideThinking}
-				failure={failure ?? session.failure}
-				onolder={() => session.loadOlder()}
+				failure={failure ?? session.failure ?? session.main.failure}
+				onolder={() => session.main.loadOlder()}
+				onregenerate={redo}
 			/>
 		{/key}
 		<ModelNotice />
 		<Composer busy={session.busy} onsend={send} onstop={() => cancelTurn(session.id)}>
 			{#snippet accessory()}
+				<ContextMeter
+					context={session.main.context}
+					disabled={session.busy || session.main.entries.length === 0}
+					oncompact={compact}
+				/>
 				<ModelPicker selection={session.selection} onchange={select} />
 			{/snippet}
 		</Composer>
@@ -150,9 +221,11 @@
 
 	{#if vm && active && !hidden}
 		<div
-			class="w-1/2 max-w-240 shrink-0"
+			class={['relative shrink-0', widths.preview === null && 'w-1/2 max-w-240']}
+			style:width={widths.preview === null ? undefined : `${widths.preview}px`}
 			transition:fly={{ x: 80, duration: 200, easing: cubicOut }}
 		>
+			<Resizer min={320} onresize={(width) => resize('preview', width)} />
 			<PreviewPane
 				session={session.id}
 				status={vm}
@@ -162,6 +235,19 @@
 				onhide={() => (hidden = true)}
 				ondestroy={() => destroyVm(session.id)}
 			/>
+		</div>
+	{/if}
+
+	{#if activity && panel}
+		<div
+			class="relative shrink-0"
+			style:width="{widths.activity}px"
+			transition:fly={{ x: 80, duration: 200, easing: cubicOut }}
+		>
+			<Resizer min={220} onresize={(width) => resize('activity', width)} />
+			{#key session}
+				<SidePanel {session} thinking={!hideThinking} onhide={() => (panel = false)} />
+			{/key}
 		</div>
 	{/if}
 </div>

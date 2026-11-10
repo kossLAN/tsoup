@@ -8,8 +8,8 @@ use serde_json::{Map, Value};
 
 use super::stream::{Collector, Data, Events};
 use super::{
-    Effort, Endpoint, LlmError, Message, OnProgress, Provider, Reply, ToolCall, ToolDefinition,
-    list_models, send, system,
+    Effort, Endpoint, Image, LlmError, Message, Model, OnProgress, Provider, Reply, ToolCall,
+    ToolDefinition, list_models, send, system,
 };
 
 const VERSION: &str = "2026-10-21";
@@ -83,6 +83,9 @@ enum Block<'a> {
     Text {
         text: &'a str,
     },
+    Image {
+        source: ImageSource<'a>,
+    },
     ToolUse {
         id: &'a str,
         name: &'a str,
@@ -95,6 +98,22 @@ enum Block<'a> {
 }
 
 #[derive(Serialize)]
+#[serde(tag = "type", rename = "base64")]
+pub(super) struct ImageSource<'a> {
+    media_type: &'a str,
+    data: &'a str,
+}
+
+impl<'a> From<&'a Image> for ImageSource<'a> {
+    fn from(image: &'a Image) -> Self {
+        Self {
+            media_type: &image.media_type,
+            data: &image.data,
+        }
+    }
+}
+
+#[derive(Serialize)]
 struct Tool<'a> {
     name: &'a str,
     description: &'a str,
@@ -104,6 +123,9 @@ struct Tool<'a> {
 #[derive(Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(super) enum StreamEvent {
+    MessageStart {
+        message: StartedMessage,
+    },
     ContentBlockStart {
         index: usize,
         content_block: StartedBlock,
@@ -114,6 +136,7 @@ pub(super) enum StreamEvent {
     },
     MessageDelta {
         delta: MessageDelta,
+        usage: Option<TokenUsage>,
     },
     MessageStop,
     Error {
@@ -121,6 +144,31 @@ pub(super) enum StreamEvent {
     },
     #[serde(other)]
     Other,
+}
+
+#[derive(Deserialize)]
+pub(super) struct StartedMessage {
+    usage: Option<TokenUsage>,
+}
+
+#[derive(Deserialize)]
+#[expect(clippy::struct_field_names, reason = "the fields are named by the API")]
+pub(super) struct TokenUsage {
+    input_tokens: Option<u64>,
+    cache_creation_input_tokens: Option<u64>,
+    cache_read_input_tokens: Option<u64>,
+    output_tokens: Option<u64>,
+}
+
+impl TokenUsage {
+    fn apply(&self, collector: &mut Collector<'_>) {
+        let input = self.input_tokens.map(|tokens| {
+            tokens
+                + self.cache_creation_input_tokens.unwrap_or(0)
+                + self.cache_read_input_tokens.unwrap_or(0)
+        });
+        collector.usage(input, self.output_tokens);
+    }
 }
 
 #[derive(Deserialize)]
@@ -161,6 +209,7 @@ pub(super) struct MessageDelta {
 #[serde(rename_all = "snake_case")]
 pub(super) enum StopReason {
     Refusal,
+    ModelContextWindowExceeded,
     #[serde(other)]
     Other,
 }
@@ -187,7 +236,16 @@ impl<'a> Turn<'a> {
     fn new(message: &'a Message) -> Option<Self> {
         let (role, content) = match message {
             Message::System { .. } => return None,
-            Message::User { content } => (Role::User, vec![Block::Text { text: content }]),
+            Message::User { content, images } => (
+                Role::User,
+                images
+                    .iter()
+                    .map(|image| Block::Image {
+                        source: image.into(),
+                    })
+                    .chain((!content.is_empty()).then_some(Block::Text { text: content }))
+                    .collect(),
+            ),
             Message::Assistant {
                 content,
                 tool_calls,
@@ -248,6 +306,11 @@ impl StreamEvent {
         F: FnOnce(String) -> String,
     {
         match self {
+            Self::MessageStart { message } => {
+                if let Some(usage) = message.usage {
+                    usage.apply(collector);
+                }
+            },
             Self::ContentBlockStart {
                 index,
                 content_block,
@@ -265,12 +328,22 @@ impl StreamEvent {
                 },
                 BlockDelta::Other => {},
             },
-            Self::MessageDelta { delta } if delta.stop_reason == Some(StopReason::Refusal) => {
-                return Err(LlmError::Refused);
+            Self::MessageDelta { delta, usage } => {
+                match delta.stop_reason {
+                    Some(StopReason::Refusal) => return Err(LlmError::Refused),
+                    Some(StopReason::ModelContextWindowExceeded) => {
+                        return Err(LlmError::Overflow);
+                    },
+                    Some(StopReason::Other) | None => {},
+                }
+
+                if let Some(usage) = usage {
+                    usage.apply(collector);
+                }
             },
             Self::MessageStop => return Ok(ControlFlow::Break(())),
-            Self::Error { error } => return Err(LlmError::Remote(error.message)),
-            Self::MessageDelta { .. } | Self::Other => {},
+            Self::Error { error } => return Err(LlmError::remote(error.message)),
+            Self::Other => {},
         }
 
         Ok(ControlFlow::Continue(()))
@@ -314,7 +387,7 @@ impl Provider for Anthropic {
         })
     }
 
-    fn models(&self) -> BoxFuture<'_, Result<Vec<String>, LlmError>> {
+    fn models(&self) -> BoxFuture<'_, Result<Vec<Model>, LlmError>> {
         Box::pin(list_models(
             self.request(Method::GET, "/v1/models?limit=1000"),
         ))

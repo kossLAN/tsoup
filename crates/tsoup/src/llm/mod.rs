@@ -33,8 +33,36 @@ pub enum LlmError {
     Encoding,
     #[error("the model API reported an error: {0}")]
     Remote(String),
+    #[error("the conversation no longer fits in the model's context window")]
+    Overflow,
     #[error(transparent)]
     ClaudeCode(#[from] ClaudeCodeError),
+}
+
+const OVERFLOW_MARKERS: [&str; 6] = [
+    "context_length_exceeded",
+    "context window",
+    "context length",
+    "prompt is too long",
+    "input is too long",
+    "too many tokens",
+];
+
+impl LlmError {
+    pub fn remote(message: String) -> Self {
+        if overflows(&message) {
+            Self::Overflow
+        } else {
+            Self::Remote(message)
+        }
+    }
+}
+
+fn overflows(message: &str) -> bool {
+    let message = message.to_lowercase();
+    OVERFLOW_MARKERS
+        .iter()
+        .any(|marker| message.contains(marker))
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +72,7 @@ pub enum Message {
     },
     User {
         content: String,
+        images: Vec<Image>,
     },
     Assistant {
         content: Option<String>,
@@ -53,6 +82,27 @@ pub enum Message {
         tool_call_id: String,
         content: String,
     },
+}
+
+impl Message {
+    pub fn user(content: impl Into<String>) -> Self {
+        Self::User {
+            content: content.into(),
+            images: Vec::new(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Image {
+    pub media_type: String,
+    pub data: String,
+}
+
+impl Image {
+    fn url(&self) -> String {
+        format!("data:{};base64,{}", self.media_type, self.data)
+    }
 }
 
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
@@ -88,6 +138,19 @@ pub struct Reply {
     pub content: Option<String>,
     pub thinking: Option<String>,
     pub tool_calls: Vec<ToolCall>,
+    pub usage: Option<Usage>,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Usage {
+    pub input: u64,
+    pub output: u64,
+}
+
+#[derive(Debug, Clone)]
+pub struct Model {
+    pub name: String,
+    pub context: Option<u64>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,7 +193,7 @@ pub trait Provider: Send + Sync {
         progress: &'a OnProgress<'a>,
     ) -> BoxFuture<'a, Result<Reply, LlmError>>;
 
-    fn models(&self) -> BoxFuture<'_, Result<Vec<String>, LlmError>>;
+    fn models(&self) -> BoxFuture<'_, Result<Vec<Model>, LlmError>>;
 }
 
 pub struct Endpoint {
@@ -152,18 +215,31 @@ impl Endpoint {
 
 #[derive(Deserialize)]
 struct ModelList {
-    data: Vec<Model>,
+    data: Vec<ListedModel>,
 }
 
 #[derive(Deserialize)]
-struct Model {
+struct ListedModel {
     id: String,
+    max_input_tokens: Option<u64>,
+    context_length: Option<u64>,
+    context_window: Option<u64>,
 }
 
-async fn list_models(request: RequestBuilder) -> Result<Vec<String>, LlmError> {
+async fn list_models(request: RequestBuilder) -> Result<Vec<Model>, LlmError> {
     let list: ModelList = send(request).await?.json().await?;
-    let mut models: Vec<_> = list.data.into_iter().map(|model| model.id).collect();
-    models.sort();
+    let mut models: Vec<_> = list
+        .data
+        .into_iter()
+        .map(|model| Model {
+            context: model
+                .max_input_tokens
+                .or(model.context_length)
+                .or(model.context_window),
+            name: model.id,
+        })
+        .collect();
+    models.sort_by(|left, right| left.name.cmp(&right.name));
     Ok(models)
 }
 
@@ -172,9 +248,12 @@ async fn send(request: RequestBuilder) -> Result<reqwest::Response, LlmError> {
     let status = response.status();
 
     if !status.is_success() {
-        return Err(LlmError::Status {
-            status,
-            body: response.text().await?,
+        let body = response.text().await?;
+
+        return Err(if overflows(&body) {
+            LlmError::Overflow
+        } else {
+            LlmError::Status { status, body }
         });
     }
 

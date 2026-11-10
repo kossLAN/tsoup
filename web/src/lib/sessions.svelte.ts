@@ -6,6 +6,7 @@ import {
 	type ListEvent,
 	type NewEnvironment,
 	type NodeSummary,
+	type Image,
 	type Selection,
 	type SessionSummary
 } from './api';
@@ -39,9 +40,10 @@ class SessionList {
 	async create(
 		environment: NewEnvironment,
 		selection: Selection,
-		message: string
+		message: string,
+		images: Image[]
 	): Promise<SessionSummary> {
-		const session = await createSession(environment, selection, message);
+		const session = await createSession(environment, selection, message, images);
 		this.#unconfirmed.add(session.id);
 		this.#add(session);
 		return session;

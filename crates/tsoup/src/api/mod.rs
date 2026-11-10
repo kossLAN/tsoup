@@ -6,7 +6,7 @@ mod web;
 
 use std::sync::Arc;
 
-use axum::extract::{Path as UrlPath, Query, State};
+use axum::extract::{DefaultBodyLimit, Path as UrlPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::Sse;
 use axum::response::sse::{self, KeepAlive};
@@ -21,9 +21,13 @@ use uuid::Uuid;
 
 pub use self::error::ApiError;
 use crate::agent::Agent;
-use crate::session::{EntryPage, NewEnvironment, Session, SessionSummary, Sessions};
+use crate::llm::Image;
+use crate::session::{Entry, EntryPage, NewEnvironment, Session, SessionSummary, Sessions};
 use crate::settings::{Selection, SettingsPatch, SettingsStore, SettingsView};
 use crate::workspace::Workspace as _;
+
+const BODY_LIMIT: usize = 64 * 1024 * 1024;
+const IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
 #[derive(Clone)]
 pub struct AppState {
@@ -55,8 +59,8 @@ impl AppState {
         Ok(self.sessions.get(id).await?)
     }
 
-    async fn begin_turn(&self, session: &Arc<Session>, text: String) -> Result<(), ApiError> {
-        let turn = Arc::clone(&self.agent).run_turn(Arc::clone(session), text);
+    async fn begin_turn(&self, session: &Arc<Session>, prompt: Entry) -> Result<(), ApiError> {
+        let turn = Arc::clone(&self.agent).run_turn(Arc::clone(session), prompt);
         Ok(session.start_turn(turn).await?)
     }
 }
@@ -81,11 +85,23 @@ pub fn router(state: AppState) -> Router {
         .route("/api/sessions/{id}/entries", get(list_entries))
         .route("/api/sessions/{id}/turns", post(start_turn))
         .route("/api/sessions/{id}/turn", delete(cancel_turn))
+        .route("/api/sessions/{id}/compact", post(compact))
+        .route("/api/sessions/{id}/regenerate", post(regenerate))
+        .route("/api/sessions/{id}/agents/{agent}", delete(stop_agent))
+        .route(
+            "/api/sessions/{id}/agents/{agent}/messages",
+            post(steer_agent),
+        )
+        .route(
+            "/api/sessions/{id}/questions/{question}",
+            post(answer_question),
+        )
         .route("/api/sessions/{id}/vm", post(start_vm).delete(destroy_vm))
         .route("/api/sessions/{id}/actions", post(run_action))
         .route("/api/nodes/{name}", get(node::connect))
         .route("/api/nodes/{name}/folders", get(node::folders))
         .fallback(web::serve)
+        .layer(DefaultBodyLimit::max(BODY_LIMIT))
         .layer(axum::middleware::from_fn_with_state(
             state.clone(),
             proxy::route,
@@ -96,11 +112,19 @@ pub fn router(state: AppState) -> Router {
 #[derive(Deserialize)]
 struct TurnRequest {
     content: String,
+    #[serde(default)]
+    images: Vec<Image>,
 }
 
 #[derive(Deserialize)]
 struct EntriesQuery {
     before: usize,
+    agent: Option<Uuid>,
+}
+
+#[derive(Deserialize)]
+struct AnswerRequest {
+    answer: String,
 }
 
 #[derive(Deserialize)]
@@ -113,11 +137,27 @@ struct NewSession {
     environment: NewEnvironment,
     selection: Option<Selection>,
     message: Option<String>,
+    #[serde(default)]
+    images: Vec<Image>,
 }
 
 #[derive(Deserialize)]
 struct SessionPatch {
     selection: Option<Selection>,
+}
+
+fn prompt(text: String, images: Vec<Image>) -> Result<Entry, ApiError> {
+    if let Some(image) = images
+        .iter()
+        .find(|image| !IMAGE_TYPES.contains(&image.media_type.as_str()))
+    {
+        return Err(ApiError::new(
+            StatusCode::BAD_REQUEST,
+            format!("{} images are not supported", image.media_type),
+        ));
+    }
+
+    Ok(Entry::User { text, images })
 }
 
 async fn get_settings(State(state): State<AppState>) -> Json<SettingsView> {
@@ -178,8 +218,9 @@ async fn create_session(
         .await?;
     state.settings.remember_effort(effort).await?;
 
-    if let Some(message) = request.message {
-        state.begin_turn(&session, message).await?;
+    if let Some(text) = request.message {
+        let prompt = prompt(text, request.images)?;
+        state.begin_turn(&session, prompt).await?;
     }
 
     Ok((StatusCode::CREATED, Json(session.summary().await)))
@@ -246,7 +287,9 @@ async fn list_entries(
     UrlPath(id): UrlPath<Uuid>,
     Query(query): Query<EntriesQuery>,
 ) -> Result<Json<EntryPage>, ApiError> {
-    Ok(Json(state.session(id).await?.page(query.before).await))
+    let session = state.session(id).await?;
+    let agent = query.agent.unwrap_or(session.id);
+    Ok(Json(session.page(agent, query.before).await?))
 }
 
 async fn start_turn(
@@ -255,7 +298,13 @@ async fn start_turn(
     Json(request): Json<TurnRequest>,
 ) -> Result<StatusCode, ApiError> {
     let session = state.session(id).await?;
-    state.begin_turn(&session, request.content).await?;
+
+    let prompt = prompt(request.content, request.images)?;
+
+    if session.steer(session.id, prompt.clone()).await.is_err() {
+        state.begin_turn(&session, prompt).await?;
+    }
+
     Ok(StatusCode::ACCEPTED)
 }
 
@@ -264,6 +313,56 @@ async fn cancel_turn(
     UrlPath(id): UrlPath<Uuid>,
 ) -> Result<StatusCode, ApiError> {
     state.session(id).await?.cancel_turn().await;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn compact(
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    let session = state.session(id).await?;
+    let compaction = Arc::clone(&state.agent).run_compaction(Arc::clone(&session));
+    session.start_turn(compaction).await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+async fn regenerate(
+    State(state): State<AppState>,
+    UrlPath(id): UrlPath<Uuid>,
+) -> Result<StatusCode, ApiError> {
+    let session = state.session(id).await?;
+    let regeneration = Arc::clone(&state.agent).run_regeneration(Arc::clone(&session));
+    session.start_turn(regeneration).await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+async fn steer_agent(
+    State(state): State<AppState>,
+    UrlPath((id, agent)): UrlPath<(Uuid, Uuid)>,
+    Json(request): Json<TurnRequest>,
+) -> Result<StatusCode, ApiError> {
+    let session = state.session(id).await?;
+    session
+        .steer(agent, prompt(request.content, request.images)?)
+        .await?;
+    Ok(StatusCode::ACCEPTED)
+}
+
+async fn stop_agent(
+    State(state): State<AppState>,
+    UrlPath((id, agent)): UrlPath<(Uuid, Uuid)>,
+) -> Result<StatusCode, ApiError> {
+    state.session(id).await?.stop_agent(agent).await?;
+    Ok(StatusCode::NO_CONTENT)
+}
+
+async fn answer_question(
+    State(state): State<AppState>,
+    UrlPath((id, question)): UrlPath<(Uuid, Uuid)>,
+    Json(request): Json<AnswerRequest>,
+) -> Result<StatusCode, ApiError> {
+    let session = state.session(id).await?;
+    session.answer(question, request.answer).await?;
     Ok(StatusCode::NO_CONTENT)
 }
 

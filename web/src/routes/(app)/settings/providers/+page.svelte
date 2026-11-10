@@ -165,7 +165,7 @@
 </script>
 
 {#if settings}
-	<div class="w-full max-w-170 px-6 py-6">
+	<div class="mx-auto w-full max-w-170 px-6 py-6">
 		<div class="flex items-end justify-between gap-4 pb-3 pl-1">
 			<div>
 				<h2 class="text-title font-medium">Providers</h2>
@@ -206,7 +206,7 @@
 				{#each settings.providers as provider (provider.id)}
 					<button
 						type="button"
-						class="flex items-center gap-3 rounded-control px-2 py-2 text-left transition-colors hover:bg-window-text/5"
+						class="flex items-center gap-3 rounded-input px-2 py-2 text-left transition-colors hover:bg-window-text/5"
 						onclick={() => edit(provider)}
 					>
 						<span

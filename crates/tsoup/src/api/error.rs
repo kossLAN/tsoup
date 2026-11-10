@@ -46,10 +46,14 @@ impl From<SessionError> for ApiError {
     fn from(error: SessionError) -> Self {
         let status = match error {
             SessionError::InvalidFolder(_) => StatusCode::BAD_REQUEST,
-            SessionError::NotFound | SessionError::NoSuchNode => StatusCode::NOT_FOUND,
-            SessionError::Busy | SessionError::NodeConnected(_) | SessionError::NotSandbox => {
-                StatusCode::CONFLICT
-            },
+            SessionError::NotFound
+            | SessionError::NoSuchNode
+            | SessionError::NoSuchAgent
+            | SessionError::NoSuchQuestion => StatusCode::NOT_FOUND,
+            SessionError::Busy
+            | SessionError::AgentIdle
+            | SessionError::NodeConnected(_)
+            | SessionError::NotSandbox => StatusCode::CONFLICT,
             SessionError::Node(_) => StatusCode::BAD_GATEWAY,
             SessionError::Io(_) | SessionError::Json(_) => {
                 tracing::error!(%error, "a session request failed");
