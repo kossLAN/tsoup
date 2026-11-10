@@ -175,24 +175,6 @@
 					{node.folder}
 				</span>
 			{/if}
-			{#if startable}
-				<button
-					class="icon-button"
-					onclick={() => startVm(session.id)}
-					{@attach tooltip('Start VM')}
-				>
-					<PlayIcon size={16} />
-				</button>
-			{/if}
-			{#if active && hidden}
-				<button
-					class="icon-button"
-					onclick={() => (hidden = false)}
-					{@attach tooltip('Show VM')}
-				>
-					<MonitorIcon size={16} />
-				</button>
-			{/if}
 			<Menu placement="bottom-end">
 				{#snippet trigger(attributes)}
 					<button class="icon-button" {...attributes} {@attach tooltip('More')}>
@@ -215,6 +197,24 @@
 						<span class="absolute top-0.5 right-0.5 size-1.5 rounded-full bg-accent"
 						></span>
 					{/if}
+				</button>
+			{/if}
+			{#if startable}
+				<button
+					class="icon-button"
+					onclick={() => startVm(session.id)}
+					{@attach tooltip('Start VM')}
+				>
+					<PlayIcon size={16} />
+				</button>
+			{/if}
+			{#if active && hidden}
+				<button
+					class="icon-button"
+					onclick={() => (hidden = false)}
+					{@attach tooltip('Show VM')}
+				>
+					<MonitorIcon size={16} />
 				</button>
 			{/if}
 		</header>
