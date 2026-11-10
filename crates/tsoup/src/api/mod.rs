@@ -70,6 +70,7 @@ pub fn router(state: AppState) -> Router {
         .route("/api/settings", get(get_settings).patch(update_settings))
         .route("/api/providers/{id}/models", get(list_models))
         .route("/api/claude-code/account", get(claude_code::account))
+        .route("/api/claude-code/usage", get(claude_code::usage))
         .route("/api/claude-code/login", post(claude_code::start_login))
         .route(
             "/api/claude-code/login/code",

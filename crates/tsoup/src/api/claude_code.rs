@@ -1,7 +1,7 @@
 use axum::Json;
 use axum::extract::State;
 use serde::{Deserialize, Serialize};
-use tsoup_claude_code::Account;
+use tsoup_claude_code::{Account, UsageReport};
 
 use super::{ApiError, AppState};
 
@@ -17,6 +17,10 @@ pub struct LoginCode {
 
 pub async fn account(State(state): State<AppState>) -> Result<Json<Account>, ApiError> {
     Ok(Json(state.claude_code.account().await?))
+}
+
+pub async fn usage(State(state): State<AppState>) -> Result<Json<UsageReport>, ApiError> {
+    Ok(Json(state.claude_code.usage().await?))
 }
 
 pub async fn start_login(State(state): State<AppState>) -> Result<Json<LoginStarted>, ApiError> {

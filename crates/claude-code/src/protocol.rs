@@ -192,3 +192,47 @@ impl Finished {
         Some(message)
     }
 }
+
+#[derive(Deserialize)]
+pub struct Reported {
+    pub usage_report: Option<UsageReport>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UsageReport {
+    pub rate_limits: Option<RateLimits>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimits {
+    pub limits: Option<Vec<Limit>>,
+    pub extra_usage: Option<ExtraUsage>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Limit {
+    pub kind: String,
+    pub percent: f64,
+    pub resets_at: Option<String>,
+    pub scope: Option<LimitScope>,
+    pub severity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LimitScope {
+    pub model: Option<Named>,
+    pub surface: Option<Named>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Named {
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtraUsage {
+    pub is_enabled: bool,
+    pub monthly_limit: Option<f64>,
+    pub used_credits: Option<f64>,
+    pub currency: Option<String>,
+}

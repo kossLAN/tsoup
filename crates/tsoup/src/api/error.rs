@@ -104,6 +104,7 @@ impl From<ClaudeCodeError> for ApiError {
         let status = match error {
             ClaudeCodeError::InvalidCode => StatusCode::BAD_REQUEST,
             ClaudeCodeError::NoLogin => StatusCode::CONFLICT,
+            ClaudeCodeError::NoUsage => StatusCode::NOT_FOUND,
             _ => StatusCode::BAD_GATEWAY,
         };
 

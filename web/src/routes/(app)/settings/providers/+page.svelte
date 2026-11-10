@@ -10,6 +10,7 @@
 		type Settings
 	} from '$lib/api';
 	import ClaudeCodeLogin from '$lib/components/ClaudeCodeLogin.svelte';
+	import ClaudeCodeUsage from '$lib/components/ClaudeCodeUsage.svelte';
 	import Menu from '$lib/components/Menu.svelte';
 	import MenuItem from '$lib/components/MenuItem.svelte';
 	import ProviderIcon from '$lib/components/ProviderIcon.svelte';
@@ -231,6 +232,9 @@
 					</button>
 				{/each}
 			</div>
+			{#if settings.providers.some((provider) => provider.kind === 'claude_code')}
+				<div class="mt-4"><ClaudeCodeUsage /></div>
+			{/if}
 		{:else}
 			<div class="grid grid-cols-2 gap-2">
 				{#each catalog as entry (entry.label)}

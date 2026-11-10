@@ -13,14 +13,18 @@ use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 
 pub use self::mcp::{McpReply, McpTool, SdkServer};
-use self::protocol::{AuthStatus, Authentication, ControlRequestInput, Initialized, Request};
+use self::protocol::{
+    AuthStatus, Authentication, ControlRequestInput, Initialized, Reported, Request,
+};
 pub use self::protocol::{
-    ControlReply, ControlRequest, ControlResponse, Finished, Output, RpcRequest, UserInput,
+    ControlReply, ControlRequest, ControlResponse, ExtraUsage, Finished, Limit, LimitScope, Named,
+    Output, RateLimits, RpcRequest, UsageReport, UserInput,
 };
 
 const INITIALIZE: &str = "initialize";
 const AUTHENTICATE: &str = "authenticate";
 const CALLBACK: &str = "callback";
+const USAGE: &str = "/usage";
 
 #[derive(Debug, thiserror::Error)]
 pub enum ClaudeCodeError {
@@ -36,6 +40,8 @@ pub enum ClaudeCodeError {
     NoLogin,
     #[error("paste the full code shown after signing in")]
     InvalidCode,
+    #[error("claude code reported no plan usage, sign in with a Claude subscription")]
+    NoUsage,
 }
 
 pub struct Cli {
@@ -238,6 +244,34 @@ impl Cli {
             .await?;
         let status: AuthStatus = serde_json::from_slice(&output.stdout)?;
         Ok(status.into())
+    }
+
+    pub async fn usage(&self) -> Result<UsageReport, ClaudeCodeError> {
+        let output = Command::new(&self.command)
+            .args([
+                "-p",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--no-session-persistence",
+                "--tools",
+                "",
+                "--setting-sources=",
+                "--strict-mcp-config",
+                USAGE,
+            ])
+            .current_dir(&self.directory)
+            .env_remove("CLAUDECODE")
+            .stdin(Stdio::null())
+            .kill_on_drop(true)
+            .output()
+            .await?;
+
+        String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Reported>(line).ok())
+            .find_map(|line| line.usage_report)
+            .ok_or(ClaudeCodeError::NoUsage)
     }
 
     pub async fn start_login(&self) -> Result<String, ClaudeCodeError> {

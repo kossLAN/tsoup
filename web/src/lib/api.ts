@@ -336,6 +336,33 @@ export type ClaudeCodeAccount = {
 	subscription: string | null;
 };
 
+export type ClaudeCodeLimit = {
+	kind: string;
+	percent: number;
+	resets_at: string | null;
+	scope: {
+		model: { display_name: string } | null;
+		surface: { display_name: string } | null;
+	} | null;
+	severity: string;
+};
+
+export type ClaudeCodeUsage = {
+	rate_limits: {
+		limits: ClaudeCodeLimit[] | null;
+		extra_usage: {
+			is_enabled: boolean;
+			monthly_limit: number | null;
+			used_credits: number | null;
+			currency: string | null;
+		} | null;
+	} | null;
+};
+
+export async function getClaudeCodeUsage(): Promise<ClaudeCodeUsage> {
+	return (await request('GET', '/api/claude-code/usage')).json();
+}
+
 export async function getClaudeCodeAccount(): Promise<ClaudeCodeAccount> {
 	return (await request('GET', '/api/claude-code/account')).json();
 }
