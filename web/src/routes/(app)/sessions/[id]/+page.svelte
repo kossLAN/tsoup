@@ -160,7 +160,7 @@
 
 <div class="flex min-w-0 flex-1">
 	<div class="flex min-w-0 flex-1 flex-col">
-		<header class="toolbar pr-3 pl-11">
+		<header class="toolbar pr-3 pl-11 group-data-[sidebar=true]/shell:pl-4">
 			<span class="flex-1 truncate text-title font-medium"
 				>{session.title || 'New session'}</span
 			>

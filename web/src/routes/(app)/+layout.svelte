@@ -3,14 +3,20 @@
 	import { sessions } from '$lib/sessions.svelte';
 	import { onMount } from 'svelte';
 
+	const key = 'tsoup.sidebar';
+
 	let { children } = $props();
 
-	let open = $state(false);
+	let open = $state(localStorage.getItem(key) === 'open');
+
+	$effect(() => localStorage.setItem(key, open ? 'open' : 'closed'));
 
 	onMount(() => sessions.connect());
 </script>
 
-<Sidebar bind:open />
-<main class="flex h-screen">
-	{@render children()}
-</main>
+<div class="group/shell flex h-screen" data-sidebar={open}>
+	<Sidebar bind:open />
+	<main class="flex min-w-0 flex-1">
+		{@render children()}
+	</main>
+</div>

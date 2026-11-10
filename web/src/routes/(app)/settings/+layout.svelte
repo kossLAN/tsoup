@@ -13,7 +13,9 @@
 </script>
 
 <div class="flex min-w-0 flex-1 flex-col">
-	<header class="toolbar pr-6 pl-11 text-title font-medium">Settings</header>
+	<header class="toolbar pr-6 pl-11 text-title font-medium group-data-[sidebar=true]/shell:pl-6">
+		Settings
+	</header>
 	<div class="flex min-h-0 flex-1">
 		<nav class="flex w-52 shrink-0 flex-col gap-0.5 px-3 py-6">
 			{#each sections as section (section.href)}
