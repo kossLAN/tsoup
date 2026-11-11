@@ -58,6 +58,10 @@ The report names the subagent's id, which resume_agent takes to continue its wor
                 None => session.model(caller.id).await?,
             },
         };
+        let model = match model {
+            Some(model) => Some(model),
+            None => session.selection().await.model.or(settings.default_model),
+        };
         let (id, stop) = session.spawn_agent(caller.id, name, model).await?;
         caller.delegate(id, stop, prompt).await
     }

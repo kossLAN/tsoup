@@ -56,6 +56,11 @@
 		{/if}
 		{#if agent}
 			<span class="min-w-0 flex-1 truncate font-medium">{agent.name}</span>
+			{#if agent.model}
+				<span class="max-w-2/5 shrink-0 truncate px-1 text-label text-secondary">
+					{agent.model.name}
+				</span>
+			{/if}
 			{#if agent.state === 'running'}
 				<button
 					class="icon-button"
