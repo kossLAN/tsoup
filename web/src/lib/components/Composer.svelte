@@ -151,7 +151,7 @@
 					class="icon-button"
 					disabled={!ready || sending}
 					onclick={send}
-					{@attach tooltip(busy ? 'Steer' : 'Send')}
+					{@attach tooltip(busy ? 'Queue' : 'Send')}
 				>
 					<ArrowElbowDownLeftIcon size={16} />
 				</button>

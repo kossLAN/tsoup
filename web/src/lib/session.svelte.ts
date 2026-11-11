@@ -9,7 +9,8 @@ import {
 	type Progress,
 	type Question,
 	type Selection,
-	type SessionEvent
+	type SessionEvent,
+	type UserEntry
 } from './api';
 import { sessions } from './sessions.svelte';
 
@@ -127,6 +128,7 @@ export class Session {
 	boots = $state(0);
 	agents = $state<AgentSummary[]>([]);
 	questions = $state<Question[]>([]);
+	queued = $state<Record<string, UserEntry[]>>({});
 
 	vm = $derived(this.environment?.kind === 'sandbox' ? this.environment.vm : null);
 
@@ -175,6 +177,7 @@ export class Session {
 				this.busy = event.busy;
 				this.agents = event.agents;
 				this.questions = event.questions;
+				this.queued = event.queued;
 				this.#settle();
 				for (const thread of this.#threads.values()) thread.load();
 				this.#setEnvironment(event.environment);
@@ -211,6 +214,7 @@ export class Session {
 				this.#threads.clear();
 				this.agents = [];
 				this.questions = [];
+				this.queued = {};
 				break;
 			case 'rewind':
 				this.main.rewind(event.length);
@@ -229,6 +233,9 @@ export class Session {
 			}
 			case 'questions':
 				this.questions = event.questions;
+				break;
+			case 'queued':
+				this.queued[event.agent] = event.entries;
 				break;
 			case 'actions':
 				this.actions = event.actions;

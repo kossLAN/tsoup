@@ -282,6 +282,14 @@ impl SessionData {
             .map(|pending| pending.question.clone())
             .collect()
     }
+
+    fn queued(&self) -> HashMap<Uuid, Vec<Entry>> {
+        self.threads
+            .iter()
+            .filter(|thread| !thread.steering.is_empty())
+            .map(|thread| (thread.summary.id, thread.steering.clone()))
+            .collect()
+    }
 }
 
 pub struct Sessions {
@@ -681,6 +689,7 @@ impl Session {
         }
 
         thread.steering.push(prompt);
+        self.emit(thread.queued());
         Ok(())
     }
 
@@ -688,7 +697,13 @@ impl Session {
         let mut data = self.data.lock().await;
         let thread = data.thread_mut(agent)?;
         thread.active = true;
-        Ok(mem::take(&mut thread.steering))
+        let steering = mem::take(&mut thread.steering);
+
+        if !steering.is_empty() {
+            self.emit(thread.queued());
+        }
+
+        Ok(steering)
     }
 
     pub async fn rest(&self, agent: Uuid) -> Result<bool, SessionError> {
@@ -707,7 +722,12 @@ impl Session {
                 continue;
             }
 
+            let queued = !thread.steering.is_empty();
             thread.idle();
+
+            if queued {
+                self.emit(thread.queued());
+            }
 
             if thread.running() {
                 thread.summary.state = AgentState::Stopped;
@@ -788,6 +808,7 @@ impl Session {
             busy: self.busy().await,
             agents: data.agents(),
             questions: data.questions(),
+            queued: data.queued(),
         };
         (snapshot, receiver)
     }

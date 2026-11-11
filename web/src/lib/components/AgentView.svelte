@@ -30,6 +30,7 @@
 		start={thread.start}
 		busy={running}
 		draft={thread.draft}
+		queued={session.queued[agent.id] ?? []}
 		compacting={thread.compacting}
 		{thinking}
 		failure={failure ?? thread.failure}

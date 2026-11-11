@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -119,6 +121,7 @@ pub enum Event {
         busy: bool,
         agents: Vec<AgentSummary>,
         questions: Vec<Question>,
+        queued: HashMap<Uuid, Vec<Entry>>,
     },
     Entry {
         agent: Uuid,
@@ -149,6 +152,10 @@ pub enum Event {
     },
     Questions {
         questions: Vec<Question>,
+    },
+    Queued {
+        agent: Uuid,
+        entries: Vec<Entry>,
     },
     Title {
         title: String,

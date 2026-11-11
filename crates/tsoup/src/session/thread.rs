@@ -3,7 +3,7 @@ use tokio::sync::oneshot;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
-use super::{AgentState, AgentSummary, Entry, Question};
+use super::{AgentState, AgentSummary, Entry, Event, Question};
 
 const PAGE_SIZE: usize = 50;
 
@@ -62,6 +62,13 @@ impl Thread {
 
     pub fn running(&self) -> bool {
         self.summary.state == AgentState::Running
+    }
+
+    pub fn queued(&self) -> Event {
+        Event::Queued {
+            agent: self.summary.id,
+            entries: self.steering.clone(),
+        }
     }
 
     pub fn idle(&mut self) {

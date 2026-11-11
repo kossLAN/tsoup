@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Entry } from '$lib/api';
+	import type { Entry, UserEntry } from '$lib/api';
 	import { WarningCircleIcon } from '$lib/icons';
 	import type { Draft } from '$lib/session.svelte';
 	import { tick } from 'svelte';
@@ -15,6 +15,7 @@
 		start,
 		busy,
 		draft,
+		queued,
 		compacting = false,
 		thinking,
 		failure,
@@ -26,6 +27,7 @@
 		start: number;
 		busy: boolean;
 		draft: Draft | null;
+		queued: UserEntry[];
 		compacting?: boolean;
 		thinking: boolean;
 		failure: string | null;
@@ -48,6 +50,7 @@
 	let pinned = true;
 	let anchor: number | null = null;
 	let end = 0;
+	let waiting = 0;
 	let loading = false;
 
 	const results = $derived(
@@ -71,10 +74,11 @@
 		void draft?.text;
 		void draft?.thinking;
 		const total = start + entries.length;
-		if (total > end && entries.at(-1)?.kind === 'user') {
+		if ((total > end && entries.at(-1)?.kind === 'user') || queued.length > waiting) {
 			pinned = true;
 		}
 		end = total;
+		waiting = queued.length;
 
 		if (pinned) {
 			scroller.scrollTop = scroller.scrollHeight;
@@ -106,6 +110,27 @@
 	}
 </script>
 
+{#snippet message(entry: UserEntry)}
+	{#if entry.images?.length}
+		<div class="flex max-w-4/5 flex-wrap justify-end gap-1.5 self-end">
+			{#each entry.images as image, position (position)}
+				<img
+					class="max-h-56 max-w-full rounded-control border border-light"
+					src="data:{image.media_type};base64,{image.data}"
+					alt="Attachment {position + 1}"
+				/>
+			{/each}
+		</div>
+	{/if}
+	{#if entry.text}
+		<div
+			class="max-w-4/5 self-end bubble text-title/relaxed wrap-break-word whitespace-pre-wrap"
+		>
+			{entry.text}
+		</div>
+	{/if}
+{/snippet}
+
 <div class="flex-1 overflow-y-auto" bind:this={scroller} onscroll={scrolled}>
 	<div
 		class={['mx-auto flex max-w-chat flex-col gap-2.5 pb-3', dense ? 'px-2 pt-2' : 'px-6 pt-6']}
@@ -116,24 +141,7 @@
 
 		{#each entries as entry, index (start + index)}
 			{#if entry.kind === 'user'}
-				{#if entry.images?.length}
-					<div class="flex max-w-4/5 flex-wrap justify-end gap-1.5 self-end">
-						{#each entry.images as image, position (position)}
-							<img
-								class="max-h-56 max-w-full rounded-control border border-light"
-								src="data:{image.media_type};base64,{image.data}"
-								alt="Attachment {position + 1}"
-							/>
-						{/each}
-					</div>
-				{/if}
-				{#if entry.text}
-					<div
-						class="max-w-4/5 self-end bubble text-title/relaxed wrap-break-word whitespace-pre-wrap"
-					>
-						{entry.text}
-					</div>
-				{/if}
+				{@render message(entry)}
 			{:else if entry.kind === 'assistant'}
 				{#if thinking && entry.thinking}
 					<Markdown text={entry.thinking} muted />
@@ -170,6 +178,15 @@
 
 		{#if busy}
 			<Working label={activity} />
+		{/if}
+
+		{#if queued.length}
+			<div class="flex flex-col gap-2.5 opacity-60">
+				<span class="self-end label">Queued</span>
+				{#each queued as entry, index (index)}
+					{@render message(entry)}
+				{/each}
+			</div>
 		{/if}
 
 		{#if failure}

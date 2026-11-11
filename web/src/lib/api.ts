@@ -29,8 +29,10 @@ export type FileDiff = {
 	patch: string;
 };
 
+export type UserEntry = { kind: 'user'; text: string; images?: Image[] };
+
 export type Entry =
-	| { kind: 'user'; text: string; images?: Image[] }
+	| UserEntry
 	| {
 			kind: 'assistant';
 			thinking?: string;
@@ -100,6 +102,7 @@ export type SessionEvent =
 			busy: boolean;
 			agents: AgentSummary[];
 			questions: Question[];
+			queued: Record<string, UserEntry[]>;
 	  }
 	| { type: 'entry'; agent: string; index: number; entry: Entry }
 	| { type: 'turn_started' }
@@ -112,6 +115,7 @@ export type SessionEvent =
 	| { type: 'progress'; agent: string; progress: Progress }
 	| { type: 'agent'; agent: AgentSummary }
 	| { type: 'questions'; questions: Question[] }
+	| { type: 'queued'; agent: string; entries: UserEntry[] }
 	| { type: 'title'; title: string }
 	| { type: 'cleared' }
 	| { type: 'rewind'; length: number }
