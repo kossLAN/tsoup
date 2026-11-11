@@ -52,6 +52,7 @@ impl From<SessionError> for ApiError {
             | SessionError::NoSuchQuestion => StatusCode::NOT_FOUND,
             SessionError::Busy
             | SessionError::AgentIdle
+            | SessionError::AgentRunning
             | SessionError::NodeConnected(_)
             | SessionError::NotSandbox => StatusCode::CONFLICT,
             SessionError::Node(_) => StatusCode::BAD_GATEWAY,

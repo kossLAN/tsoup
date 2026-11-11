@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Entry, UserEntry } from '$lib/api';
+	import type { AgentSummary, Entry, UserEntry } from '$lib/api';
 	import { WarningCircleIcon } from '$lib/icons';
 	import type { Draft } from '$lib/session.svelte';
 	import { tick } from 'svelte';
@@ -16,6 +16,7 @@
 		busy,
 		draft,
 		queued,
+		agents,
 		compacting = false,
 		thinking,
 		failure,
@@ -28,6 +29,7 @@
 		busy: boolean;
 		draft: Draft | null;
 		queued: UserEntry[];
+		agents: AgentSummary[];
 		compacting?: boolean;
 		thinking: boolean;
 		failure: string | null;
@@ -152,7 +154,12 @@
 				{#if entry.tool_calls.length}
 					<div class="flex flex-col gap-0.5">
 						{#each entry.tool_calls as call (call.id)}
-							<ToolCallLine {call} result={results.get(call.id)} pending={busy} />
+							<ToolCallLine
+								{call}
+								result={results.get(call.id)}
+								pending={busy}
+								{agents}
+							/>
 						{/each}
 					</div>
 				{/if}

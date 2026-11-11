@@ -227,6 +227,7 @@
 				busy={session.busy}
 				draft={session.main.draft}
 				queued={session.queued[session.id] ?? []}
+				agents={session.agents}
 				compacting={session.main.compacting}
 				thinking={!hideThinking}
 				failure={failure ?? session.failure ?? session.main.failure}

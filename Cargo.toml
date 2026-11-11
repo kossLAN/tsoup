@@ -31,7 +31,7 @@ rust-embed = { version = "8.13.0", features = [
   "interpolate-folder-path",
   "mime-guess",
 ] }
-schemars = "1.2.3"
+schemars = { version = "1.2.3", features = ["uuid1"] }
 scraper = "0.29.0"
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"

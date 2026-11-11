@@ -31,6 +31,7 @@
 		busy={running}
 		draft={thread.draft}
 		queued={session.queued[agent.id] ?? []}
+		agents={session.agents}
 		compacting={thread.compacting}
 		{thinking}
 		failure={failure ?? thread.failure}

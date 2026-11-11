@@ -40,6 +40,8 @@ pub enum SessionError {
     NoSuchAgent,
     #[error("the agent is not running")]
     AgentIdle,
+    #[error("the agent is still running")]
+    AgentRunning,
     #[error("no such question is pending")]
     NoSuchQuestion,
     #[error("no such node is connected")]
@@ -657,6 +659,45 @@ impl Session {
         let id = agent.id;
         self.record(&mut data, Record::Agent { agent }).await?;
         Ok((id, data.thread(id)?.stop.clone()))
+    }
+
+    pub async fn resume_agent(
+        &self,
+        parent: Uuid,
+        agent: Uuid,
+    ) -> Result<CancellationToken, SessionError> {
+        let mut data = self.data.lock().await;
+        let thread = data.thread(agent)?;
+
+        if thread.summary.parent != Some(parent) {
+            return Err(SessionError::NoSuchAgent);
+        }
+
+        if thread.running() {
+            return Err(SessionError::AgentRunning);
+        }
+
+        let summary = AgentSummary {
+            state: AgentState::Running,
+            ..thread.summary.clone()
+        };
+        self.record(&mut data, Record::Agent { agent: summary })
+            .await?;
+
+        let thread = data.thread_mut(agent)?;
+        thread.stop = CancellationToken::new();
+        Ok(thread.stop.clone())
+    }
+
+    pub async fn subagents(&self, parent: Uuid) -> Vec<AgentSummary> {
+        self.data
+            .lock()
+            .await
+            .threads
+            .iter()
+            .filter(|thread| thread.summary.parent == Some(parent))
+            .map(|thread| thread.summary.clone())
+            .collect()
     }
 
     pub async fn finish_agent(&self, agent: Uuid, state: AgentState) -> Result<(), SessionError> {

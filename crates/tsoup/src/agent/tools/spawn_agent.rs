@@ -2,7 +2,6 @@ use schemars::JsonSchema;
 use serde::Deserialize;
 
 use super::{Caller, Outcome, Scope, Tool, ToolError};
-use crate::session::{AgentState, Entry};
 use crate::workspace::Workspace;
 
 pub struct SpawnAgent;
@@ -27,7 +26,8 @@ impl<E: Workspace> Tool<E> for SpawnAgent {
     const DESCRIPTION: &'static str = "Hand a task to a subagent and wait for its final report.
 The subagent works in the same workspace with the same tools.
 Call it several times in one message to run subagents in parallel,
-for independent pieces of work or to keep long explorations out of your context.";
+for independent pieces of work or to keep long explorations out of your context.
+The report names the subagent's id, which resume_agent takes to continue its work.";
     const PARALLEL: bool = true;
 
     type Arguments = Arguments;
@@ -59,48 +59,6 @@ for independent pieces of work or to keep long explorations out of your context.
             },
         };
         let (id, stop) = session.spawn_agent(caller.id, name, model).await?;
-
-        let run = async {
-            let prompt = Entry::User {
-                text: prompt,
-                images: Vec::new(),
-            };
-            session.push(id, prompt).await?;
-            caller.agent.run(session, id, caller.scope.depth + 1).await
-        };
-        let result = tokio::select! {
-            result = run => Some(result),
-            () = stop.cancelled() => None,
-        };
-
-        let (state, outcome) = match result {
-            Some(Ok(report)) => (
-                AgentState::Finished,
-                Outcome::text(
-                    report.unwrap_or_else(|| "the agent finished without a report".to_owned()),
-                ),
-            ),
-            Some(Err(error)) => (
-                AgentState::Failed,
-                Outcome {
-                    output: format!("the agent failed: {error}"),
-                    error: true,
-                    diff: None,
-                },
-            ),
-            None => (
-                AgentState::Stopped,
-                Outcome {
-                    output: "the user stopped the agent".to_owned(),
-                    error: true,
-                    diff: None,
-                },
-            ),
-        };
-
-        let finished = session.finish_agent(id, state).await;
-        session.settle(id).await;
-        finished?;
-        Ok(outcome)
+        caller.delegate(id, stop, prompt).await
     }
 }

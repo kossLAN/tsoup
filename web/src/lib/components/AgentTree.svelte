@@ -16,13 +16,32 @@
 	} = $props();
 </script>
 
-{#snippet branch(parent: string, depth: number)}
-	{#each agents.filter((agent) => agent.parent === parent) as agent (agent.id)}
+{#snippet branch(parent: string, trail: boolean[])}
+	{@const children = agents.filter((agent) => agent.parent === parent)}
+	{#each children as agent, index (agent.id)}
+		{@const last = index === children.length - 1}
 		<button
-			class="nav-item h-6.5 w-full shrink-0 gap-1.5 pr-1 text-left"
-			style:padding-left="{4 + depth * 10}px"
+			class="nav-item h-6.5 w-full shrink-0 gap-1.5 px-1 text-left"
 			onclick={() => onselect(agent)}
 		>
+			{#each trail as open, level (level)}
+				<span
+					class={[
+						'ml-1.75 w-1.75 shrink-0 self-stretch',
+						open && 'border-l border-light'
+					]}
+				></span>
+			{/each}
+			<span
+				class={['ml-1.75 w-1.75 shrink-0 self-stretch', !last && 'border-l border-light']}
+			>
+				<span
+					class={[
+						'block h-1/2 border-b border-light',
+						last && 'rounded-bl-small border-l'
+					]}
+				></span>
+			</span>
 			<span class="status text-secondary">
 				{#if agent.state === 'running'}
 					<Spinner size={12} kind="stir" />
@@ -43,7 +62,7 @@
 				</span>
 			{/if}
 		</button>
-		{@render branch(agent.id, depth + 1)}
+		{@render branch(agent.id, [...trail, !last])}
 	{/each}
 {/snippet}
 
@@ -58,5 +77,5 @@
 		</span>
 		<span class="truncate">Main agent</span>
 	</div>
-	{@render branch(root, 1)}
+	{@render branch(root, [])}
 </div>

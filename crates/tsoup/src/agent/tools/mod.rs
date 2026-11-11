@@ -2,8 +2,10 @@ mod ask;
 mod create_vm;
 mod destroy_vm;
 mod edit_file;
+mod list_agents;
 mod mcp;
 mod read_file;
+mod resume_agent;
 mod run_vm;
 mod set_actions;
 mod shell;
@@ -19,6 +21,7 @@ use schemars::JsonSchema;
 use schemars::generate::SchemaSettings;
 use serde::de::DeserializeOwned;
 use similar::TextDiff;
+use tokio_util::sync::CancellationToken;
 use tsoup_proto::{MAX_OUTPUT, McpFailure};
 use uuid::Uuid;
 
@@ -26,7 +29,9 @@ use self::ask::Ask;
 use self::create_vm::CreateVm;
 use self::destroy_vm::DestroyVm;
 use self::edit_file::EditFile;
+use self::list_agents::ListAgents;
 use self::read_file::ReadFile;
+use self::resume_agent::ResumeAgent;
 use self::run_vm::RunVm;
 use self::set_actions::SetActions;
 use self::shell::Shell;
@@ -38,7 +43,7 @@ use self::write_file::WriteFile;
 use super::Agent;
 use crate::llm::{FunctionCall, ToolCall, ToolDefinition};
 use crate::node::Folder;
-use crate::session::{Environment, FileDiff, Sandbox, Session, SessionError};
+use crate::session::{AgentState, Entry, Environment, FileDiff, Sandbox, Session, SessionError};
 use crate::vm::VmError;
 use crate::workspace::{Workspace, WorkspaceError};
 
@@ -153,6 +158,62 @@ pub struct Caller<'a> {
     pub session: &'a Session,
     pub id: Uuid,
     pub scope: Scope,
+}
+
+impl Caller<'_> {
+    async fn delegate(
+        &self,
+        agent: Uuid,
+        stop: CancellationToken,
+        prompt: String,
+    ) -> Result<Outcome, ToolError> {
+        let session = self.session;
+
+        let run = async {
+            let prompt = Entry::User {
+                text: prompt,
+                images: Vec::new(),
+            };
+            session.push(agent, prompt).await?;
+            self.agent.run(session, agent, self.scope.depth + 1).await
+        };
+        let result = tokio::select! {
+            result = run => Some(result),
+            () = stop.cancelled() => None,
+        };
+
+        let (state, outcome) = match result {
+            Some(Ok(Some(report))) => (
+                AgentState::Finished,
+                Outcome::text(format!("agent {agent} reported:\n{report}")),
+            ),
+            Some(Ok(None)) => (
+                AgentState::Finished,
+                Outcome::text(format!("agent {agent} finished without a report")),
+            ),
+            Some(Err(error)) => (
+                AgentState::Failed,
+                Outcome {
+                    output: format!("agent {agent} failed: {error}"),
+                    error: true,
+                    diff: None,
+                },
+            ),
+            None => (
+                AgentState::Stopped,
+                Outcome {
+                    output: format!("the user stopped agent {agent}"),
+                    error: true,
+                    diff: None,
+                },
+            ),
+        };
+
+        let finished = session.finish_agent(agent, state).await;
+        session.settle(agent).await;
+        finished?;
+        Ok(outcome)
+    }
 }
 
 pub trait Tool<E>: Send + Sync + 'static {
@@ -301,6 +362,8 @@ impl Tools {
                 Box::new(WriteFile),
                 Box::new(EditFile),
                 Box::new(SpawnAgent),
+                Box::new(ResumeAgent),
+                Box::new(ListAgents),
                 Box::new(Ask),
                 Box::new(WebSearch(http.clone())),
                 Box::new(WebFetch(http.clone())),
@@ -311,6 +374,8 @@ impl Tools {
                 Box::new(WriteFile),
                 Box::new(EditFile),
                 Box::new(SpawnAgent),
+                Box::new(ResumeAgent),
+                Box::new(ListAgents),
                 Box::new(Ask),
                 Box::new(WebSearch(http.clone())),
                 Box::new(WebFetch(http)),

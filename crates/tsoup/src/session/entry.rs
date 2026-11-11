@@ -64,6 +64,17 @@ pub enum AgentState {
     Stopped,
 }
 
+impl AgentState {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Running => "running",
+            Self::Finished => "finished",
+            Self::Failed => "failed",
+            Self::Stopped => "stopped",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSummary {
     pub id: Uuid,

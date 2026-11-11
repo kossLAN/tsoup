@@ -1,5 +1,5 @@
 <script lang="ts">
-	import type { Entry, ToolCall } from '$lib/api';
+	import type { AgentSummary, Entry, ToolCall } from '$lib/api';
 	import { CaretRightIcon, WarningCircleIcon } from '$lib/icons';
 	import type { ClassValue } from 'svelte/elements';
 	import Diff from './Diff.svelte';
@@ -10,8 +10,14 @@
 	let {
 		call,
 		result,
-		pending
-	}: { call: ToolCall; result: ToolResult | undefined; pending: boolean } = $props();
+		pending,
+		agents
+	}: {
+		call: ToolCall;
+		result: ToolResult | undefined;
+		pending: boolean;
+		agents: AgentSummary[];
+	} = $props();
 
 	let open = $state<boolean | null>(null);
 
@@ -30,6 +36,8 @@
 		web_search: ['searching', 'searched'],
 		web_fetch: ['fetching', 'fetched'],
 		spawn_agent: ['running agent', 'ran agent'],
+		resume_agent: ['resuming agent', 'resumed agent'],
+		list_agents: ['listing agents', 'listed agents'],
 		ask: ['asking', 'asked']
 	};
 
@@ -60,6 +68,8 @@
 			: []
 	);
 
+	const agent = $derived(agents.find(({ id }) => id === args.agent));
+
 	const target = $derived.by(() => {
 		if (typeof args.command === 'string') return args.command;
 		if (typeof args.path === 'string') return args.path;
@@ -67,6 +77,7 @@
 		if (typeof args.query === 'string') return args.query;
 		if (typeof args.port === 'number') return `port ${args.port}`;
 		if (typeof args.name === 'string') return args.name;
+		if (agent) return agent.name;
 		if (questions.length === 1) return questions[0];
 		if (questions.length) return `${questions.length} questions`;
 		return '';
