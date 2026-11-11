@@ -39,7 +39,7 @@
 	import { sessions } from '$lib/sessions.svelte';
 	import { cubicOut } from 'svelte/easing';
 	import { onMount } from 'svelte';
-	import { fly } from 'svelte/transition';
+	import { slide } from 'svelte/transition';
 
 	const session = $derived(new Session(page.params.id ?? ''));
 	let hidden = $state(false);
@@ -48,6 +48,8 @@
 	let failure = $state<string | null>(null);
 	let hideThinking = $state(true);
 	let asked = 0;
+
+	const drawer = { axis: 'x', duration: 200, easing: cubicOut } as const;
 
 	const activity = $derived(session.agents.length > 0 || session.questions.length > 0);
 
@@ -158,7 +160,7 @@
 	}
 </script>
 
-<div class="flex min-w-0 flex-1">
+<div class="@container flex min-w-0 flex-1">
 	<div class="flex min-w-0 flex-1 flex-col">
 		<header class="toolbar pr-3 pl-11 group-data-[sidebar=true]/shell:pl-4">
 			<span class="flex-1 truncate text-title font-medium"
@@ -246,34 +248,33 @@
 	</div>
 
 	{#if vm && active && !hidden}
-		<div
-			class={['relative shrink-0', widths.preview === null && 'w-1/2 max-w-240']}
-			style:width={widths.preview === null ? undefined : `${widths.preview}px`}
-			transition:fly={{ x: 80, duration: 200, easing: cubicOut }}
-		>
+		<div class="relative shrink-0" transition:slide={drawer}>
 			<Resizer min={320} onresize={(width) => resize('preview', width)} />
-			<PreviewPane
-				session={session.id}
-				status={vm}
-				boots={session.boots}
-				actions={session.actions}
-				onaction={run}
-				onhide={() => (hidden = true)}
-				ondestroy={() => destroyVm(session.id)}
-			/>
+			<div
+				class={['h-full', widths.preview === null && 'w-[50cqw] max-w-240']}
+				style:width={widths.preview === null ? undefined : `${widths.preview}px`}
+			>
+				<PreviewPane
+					session={session.id}
+					status={vm}
+					boots={session.boots}
+					actions={session.actions}
+					onaction={run}
+					onhide={() => (hidden = true)}
+					ondestroy={() => destroyVm(session.id)}
+				/>
+			</div>
 		</div>
 	{/if}
 
 	{#if activity && panel}
-		<div
-			class="relative shrink-0"
-			style:width="{widths.activity}px"
-			transition:fly={{ x: 80, duration: 200, easing: cubicOut }}
-		>
+		<div class="relative shrink-0" transition:slide={drawer}>
 			<Resizer min={220} onresize={(width) => resize('activity', width)} />
-			{#key session}
-				<SidePanel {session} thinking={!hideThinking} onhide={() => (panel = false)} />
-			{/key}
+			<div class="h-full" style:width="{widths.activity}px">
+				{#key session}
+					<SidePanel {session} thinking={!hideThinking} onhide={() => (panel = false)} />
+				{/key}
+			</div>
 		</div>
 	{/if}
 </div>
