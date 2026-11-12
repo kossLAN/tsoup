@@ -323,11 +323,16 @@ export type Settings = {
 	subagents: Subagents;
 	vm: VmSettings;
 	compaction: Compaction;
+	search: Search;
 };
 
 export type Prompt = {
 	text: string;
 	default: string;
+};
+
+export type Search = {
+	searxng: string | null;
 };
 
 export type Compaction = {
@@ -367,6 +372,7 @@ export type SettingsPatch = {
 	subagents?: Subagents;
 	vm?: VmSettings;
 	compaction?: Compaction;
+	search?: Search;
 };
 
 export async function getSettings(): Promise<Settings> {

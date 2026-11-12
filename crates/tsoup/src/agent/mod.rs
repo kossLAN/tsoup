@@ -219,6 +219,7 @@ impl Agent {
             depth,
             limit: settings.subagents.limit(),
             compact: settings.compaction.tool,
+            search: settings.search.searxng.is_some(),
         };
         let effort = match settings.subagents.effort {
             Some(effort) if depth > 0 => Some(effort),

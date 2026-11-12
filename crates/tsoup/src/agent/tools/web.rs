@@ -11,7 +11,7 @@ use scraper::{ElementRef, Html, Selector};
 use super::ToolError;
 
 const USER_AGENT: &str = concat!("tsoup/", env!("CARGO_PKG_VERSION"));
-const TIMEOUT: Duration = Duration::from_secs(30);
+pub const TIMEOUT: Duration = Duration::from_secs(30);
 const MAX_REDIRECTS: usize = 5;
 const MAX_BODY: usize = 4 * 1024 * 1024;
 const CONTENT: &str = "main, article, [role=main]";

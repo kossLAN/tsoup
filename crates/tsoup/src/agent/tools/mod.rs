@@ -88,6 +88,10 @@ pub enum ToolError {
     Private,
     #[error("the page is {0}, not text")]
     NotText(String),
+    #[error(
+        "the SearXNG instance does not answer in json, its settings have to list json under search.formats"
+    )]
+    SearchFormat,
     #[error("the search returned no results")]
     NoResults,
     #[error("the summary is empty, write what is needed to carry on")]
@@ -176,6 +180,7 @@ pub struct Scope {
     pub depth: usize,
     pub limit: usize,
     pub compact: bool,
+    pub search: bool,
 }
 
 pub struct Caller<'a> {
@@ -350,7 +355,7 @@ impl Tools {
                 Box::new(WaitAgents),
                 Box::new(Ask),
                 Box::new(Compact),
-                Box::new(WebSearch(http.clone())),
+                Box::new(WebSearch),
                 Box::new(WebFetch(http.clone())),
             ]),
             node: Toolbox::new(vec![
@@ -365,7 +370,7 @@ impl Tools {
                 Box::new(WaitAgents),
                 Box::new(Ask),
                 Box::new(Compact),
-                Box::new(WebSearch(http.clone())),
+                Box::new(WebSearch),
                 Box::new(WebFetch(http)),
             ]),
         }

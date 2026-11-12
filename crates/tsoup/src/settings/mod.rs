@@ -4,7 +4,7 @@ use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
 
-use reqwest::Client;
+use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt as _;
 use tokio::sync::RwLock;
@@ -32,6 +32,8 @@ pub enum SettingsError {
     UnknownProvider,
     #[error("every provider needs an endpoint url")]
     MissingUrl,
+    #[error("the SearXNG address has to be an http or https url")]
+    SearchAddress,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -46,6 +48,34 @@ pub struct Settings {
     pub compaction: Compaction,
     pub subagents: Subagents,
     pub vm: VmSettings,
+    pub search: Search,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(default)]
+pub struct Search {
+    pub searxng: Option<String>,
+}
+
+impl Search {
+    fn normalized(self) -> Result<Self, SettingsError> {
+        let Some(address) = self
+            .searxng
+            .as_deref()
+            .map(|address| address.trim().trim_end_matches('/'))
+            .filter(|address| !address.is_empty())
+        else {
+            return Ok(Self::default());
+        };
+
+        if !Url::parse(address).is_ok_and(|url| matches!(url.scheme(), "http" | "https")) {
+            return Err(SettingsError::SearchAddress);
+        }
+
+        Ok(Self {
+            searxng: Some(address.to_owned()),
+        })
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
@@ -258,6 +288,7 @@ pub struct SettingsView {
     pub compaction: Compaction,
     pub subagents: Subagents,
     pub vm: VmSettings,
+    pub search: Search,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -295,6 +326,7 @@ impl From<&Settings> for SettingsView {
             compaction: settings.compaction,
             subagents: settings.subagents.clone(),
             vm: settings.vm,
+            search: settings.search.clone(),
         }
     }
 }
@@ -309,6 +341,7 @@ pub struct SettingsPatch {
     pub compaction: Option<Compaction>,
     pub subagents: Option<Subagents>,
     pub vm: Option<VmSettings>,
+    pub search: Option<Search>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -437,6 +470,10 @@ impl SettingsStore {
                 cpus: vm.cpus.max(1),
                 ..vm
             };
+        }
+
+        if let Some(search) = patch.search {
+            updated.search = search.normalized()?;
         }
 
         updated.prune();

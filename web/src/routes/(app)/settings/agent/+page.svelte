@@ -242,6 +242,31 @@
 
 		<section>
 			<div class="pb-3 pl-1">
+				<h2 class="text-title font-medium">Web search</h2>
+				<p class="text-secondary">Where agents look things up with the web_search tool</p>
+			</div>
+
+			<div class="flex flex-col rounded-surface surface p-1">
+				<label class="flex items-center gap-3 px-3 py-2.5">
+					{@render row(
+						'SearXNG instance',
+						'An instance that serves json, needed for agents to search'
+					)}
+					<input
+						class="input w-64 flex-none"
+						type="url"
+						placeholder="https://searx.example.com"
+						spellcheck="false"
+						value={settings.search.searxng ?? ''}
+						onchange={(event) =>
+							patch({ search: { searxng: event.currentTarget.value } })}
+					/>
+				</label>
+			</div>
+		</section>
+
+		<section>
+			<div class="pb-3 pl-1">
 				<h2 class="text-title font-medium">System prompts</h2>
 				<p class="text-secondary">What every agent is told before a conversation starts</p>
 			</div>
