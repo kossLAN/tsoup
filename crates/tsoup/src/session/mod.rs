@@ -1,5 +1,6 @@
 mod entry;
 mod environment;
+mod groups;
 mod sandbox;
 mod thread;
 
@@ -20,6 +21,8 @@ pub use self::entry::{
     Action, AgentState, AgentSummary, Context, Entry, Event, FileDiff, Question, Record,
 };
 pub use self::environment::{Environment, EnvironmentStatus, NewEnvironment};
+pub use self::groups::Group;
+use self::groups::Groups;
 pub use self::sandbox::{Sandbox, WORKSPACE_DIR};
 pub use self::thread::EntryPage;
 use self::thread::{Pending, Thread};
@@ -52,6 +55,10 @@ pub enum SessionError {
     NotSandbox,
     #[error("{0:?} is not a folder name, it must not be empty, start with '.' or contain '/'")]
     InvalidFolder(String),
+    #[error("no such session folder")]
+    NoSuchGroup,
+    #[error("a session folder needs a name")]
+    UnnamedGroup,
     #[error(transparent)]
     Node(#[from] NodeError),
     #[error("session storage: {0}")]
@@ -65,6 +72,7 @@ pub struct SessionSummary {
     pub id: Uuid,
     pub title: String,
     pub busy: bool,
+    pub group: Option<Uuid>,
     pub environment: EnvironmentStatus,
 }
 
@@ -73,6 +81,7 @@ pub struct SessionSummary {
 pub enum ListEvent {
     Snapshot {
         sessions: Vec<SessionSummary>,
+        groups: Vec<Group>,
         nodes: Vec<NodeSummary>,
     },
     Created {
@@ -88,6 +97,13 @@ pub enum ListEvent {
     Title {
         id: Uuid,
         title: String,
+    },
+    Group {
+        id: Uuid,
+        group: Option<Uuid>,
+    },
+    Groups {
+        groups: Vec<Group>,
     },
     Environment {
         id: Uuid,
@@ -130,6 +146,10 @@ impl Events {
                 id: self.id,
                 title: title.clone(),
             }),
+            Event::Group { group } => Some(ListEvent::Group {
+                id: self.id,
+                group: *group,
+            }),
             Event::Environment { environment } => Some(ListEvent::Environment {
                 id: self.id,
                 environment: environment.clone(),
@@ -151,6 +171,7 @@ impl Events {
 struct SessionData {
     titled: bool,
     title: String,
+    group: Option<Uuid>,
     threads: Vec<Thread>,
     questions: Vec<Pending>,
     actions: Vec<Action>,
@@ -162,6 +183,7 @@ impl SessionData {
         Self {
             title: String::new(),
             titled: false,
+            group: None,
             threads: vec![Thread::main(id)],
             questions: Vec::new(),
             actions: Vec::new(),
@@ -237,6 +259,10 @@ impl SessionData {
                 self.selection.clone_from(&selection);
                 Some(Event::Selection { selection })
             },
+            Record::Group { group } => {
+                self.group = group;
+                Some(Event::Group { group })
+            },
         }
     }
 
@@ -299,6 +325,7 @@ pub struct Sessions {
     runtime: PathBuf,
     builder: Arc<Builder>,
     by_id: RwLock<HashMap<Uuid, Arc<Session>>>,
+    groups: Mutex<Groups>,
     nodes: RwLock<BTreeMap<String, Arc<Node>>>,
     changes: broadcast::Sender<ListEvent>,
 }
@@ -307,6 +334,7 @@ impl Sessions {
     pub async fn load(
         root: PathBuf,
         runtime: PathBuf,
+        groups: PathBuf,
         builder: Arc<Builder>,
     ) -> Result<Self, SessionError> {
         let mut sessions = Self {
@@ -314,6 +342,7 @@ impl Sessions {
             runtime,
             builder,
             by_id: RwLock::default(),
+            groups: Mutex::new(Groups::load(groups).await?),
             nodes: RwLock::default(),
             changes: broadcast::channel(EVENT_BUFFER).0,
         };
@@ -360,6 +389,7 @@ impl Sessions {
         let receiver = self.changes.subscribe();
         let snapshot = ListEvent::Snapshot {
             sessions: self.list().await,
+            groups: self.groups.lock().await.list(),
             nodes: summaries(&*self.nodes.read().await),
         };
         (snapshot, receiver)
@@ -389,11 +419,66 @@ impl Sessions {
         Ok(node.folders().await?)
     }
 
+    pub async fn create_group(&self, name: &str) -> Result<Group, SessionError> {
+        let name = group_name(name)?;
+        let mut groups = self.groups.lock().await;
+        let group = groups.create(name).await?;
+        self.announce(&groups);
+        Ok(group)
+    }
+
+    pub async fn rename_group(&self, id: Uuid, name: &str) -> Result<(), SessionError> {
+        let name = group_name(name)?;
+        let mut groups = self.groups.lock().await;
+        groups.rename(id, name).await?;
+        self.announce(&groups);
+        Ok(())
+    }
+
+    pub async fn delete_group(&self, id: Uuid) -> Result<(), SessionError> {
+        let mut groups = self.groups.lock().await;
+        groups.remove(id).await?;
+
+        let sessions: Vec<_> = self.by_id.read().await.values().cloned().collect();
+
+        for session in sessions {
+            if session.group().await == Some(id) {
+                session.place(None).await?;
+            }
+        }
+
+        self.announce(&groups);
+        Ok(())
+    }
+
+    pub async fn place(&self, id: Uuid, group: Option<Uuid>) -> Result<(), SessionError> {
+        let groups = self.groups.lock().await;
+
+        if group.is_some_and(|group| !groups.contains(group)) {
+            return Err(SessionError::NoSuchGroup);
+        }
+
+        self.get(id).await?.place(group).await
+    }
+
+    fn announce(&self, groups: &Groups) {
+        let _ = self.changes.send(ListEvent::Groups {
+            groups: groups.list(),
+        });
+    }
+
     pub async fn create(
         &self,
         environment: NewEnvironment,
         selection: Selection,
+        group: Option<Uuid>,
     ) -> Result<Arc<Session>, SessionError> {
+        if let Some(group) = group
+            && !self.groups.lock().await.contains(group)
+        {
+            return Err(SessionError::NoSuchGroup);
+        }
+
         let id = Uuid::now_v7();
         let events = self.events(id);
         let nodes = self.nodes.read().await;
@@ -425,6 +510,7 @@ impl Sessions {
 
         let session = Arc::new(Session::new(id, environment, SessionData::new(id), events));
         session.select(selection).await?;
+        session.place(group).await?;
         self.insert(Arc::clone(&session)).await;
         Ok(session)
     }
@@ -559,12 +645,29 @@ impl Session {
     }
 
     pub async fn summary(&self) -> SessionSummary {
+        let data = self.data.lock().await;
+
         SessionSummary {
             id: self.id,
-            title: self.data.lock().await.title.clone(),
+            title: data.title.clone(),
             busy: self.busy().await,
+            group: data.group,
             environment: self.environment.status(),
         }
+    }
+
+    async fn group(&self) -> Option<Uuid> {
+        self.data.lock().await.group
+    }
+
+    async fn place(&self, group: Option<Uuid>) -> Result<(), SessionError> {
+        let mut data = self.data.lock().await;
+
+        if data.group == group {
+            return Ok(());
+        }
+
+        self.record(&mut data, Record::Group { group }).await
     }
 
     pub async fn entries(&self, agent: Uuid) -> Result<Vec<Entry>, SessionError> {
@@ -906,6 +1009,12 @@ impl Session {
             .as_ref()
             .is_some_and(|handle| !handle.is_finished())
     }
+}
+
+fn group_name(name: &str) -> Result<String, SessionError> {
+    Some(title(name))
+        .filter(|name| !name.is_empty())
+        .ok_or(SessionError::UnnamedGroup)
 }
 
 fn title(text: &str) -> String {

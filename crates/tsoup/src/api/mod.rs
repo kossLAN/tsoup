@@ -1,5 +1,6 @@
 mod claude_code;
 mod error;
+mod group;
 mod node;
 mod proxy;
 mod web;
@@ -10,7 +11,7 @@ use axum::extract::{DefaultBodyLimit, Path as UrlPath, Query, State};
 use axum::http::StatusCode;
 use axum::response::Sse;
 use axum::response::sse::{self, KeepAlive};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{delete, get, patch, post, put};
 use axum::{Json, Router};
 use futures_util::{Stream, StreamExt as _, stream};
 use serde::{Deserialize, Serialize};
@@ -81,6 +82,12 @@ pub fn router(state: AppState) -> Router {
             "/api/sessions/{id}",
             patch(update_session).delete(delete_session),
         )
+        .route("/api/sessions/{id}/group", put(group::place))
+        .route("/api/groups", post(group::create))
+        .route(
+            "/api/groups/{id}",
+            patch(group::rename).delete(group::delete),
+        )
         .route("/api/sessions/{id}/events", get(events))
         .route(
             "/api/sessions/{id}/entries",
@@ -139,6 +146,7 @@ struct ActionRequest {
 struct NewSession {
     environment: NewEnvironment,
     selection: Option<Selection>,
+    group: Option<Uuid>,
     message: Option<String>,
     #[serde(default)]
     images: Vec<Image>,
@@ -215,7 +223,7 @@ async fn create_session(
     let effort = selection.effort;
     let session = state
         .sessions
-        .create(request.environment, selection)
+        .create(request.environment, selection, request.group)
         .await?;
     state.settings.remember_effort(effort).await?;
 

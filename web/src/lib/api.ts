@@ -2,7 +2,13 @@ export type SessionSummary = {
 	id: string;
 	title: string;
 	busy: boolean;
+	group: string | null;
 	environment: EnvironmentStatus;
+};
+
+export type Group = {
+	id: string;
+	name: string;
 };
 
 export type NodeSummary = {
@@ -127,6 +133,7 @@ export type SessionEvent =
 	| { type: 'questions'; questions: Question[] }
 	| { type: 'queued'; agent: string; entries: UserEntry[] }
 	| { type: 'title'; title: string }
+	| { type: 'group'; group: string | null }
 	| { type: 'cleared' }
 	| { type: 'rewind'; length: number }
 	| { type: 'compacting'; agent: string };
@@ -137,11 +144,13 @@ export type Progress =
 	| { kind: 'tool_call'; name: string };
 
 export type ListEvent =
-	| { type: 'snapshot'; sessions: SessionSummary[]; nodes: NodeSummary[] }
+	| { type: 'snapshot'; sessions: SessionSummary[]; groups: Group[]; nodes: NodeSummary[] }
 	| { type: 'created'; session: SessionSummary }
 	| { type: 'removed'; id: string }
 	| { type: 'busy'; id: string; busy: boolean }
 	| { type: 'title'; id: string; title: string }
+	| { type: 'group'; id: string; group: string | null }
+	| { type: 'groups'; groups: Group[] }
 	| { type: 'environment'; id: string; environment: EnvironmentStatus }
 	| { type: 'nodes'; nodes: NodeSummary[] };
 
@@ -170,11 +179,28 @@ export async function createSession(
 	environment: NewEnvironment,
 	selection: Selection,
 	message: string,
-	images: Image[] = []
+	images: Image[] = [],
+	group: string | null = null
 ): Promise<SessionSummary> {
 	return (
-		await request('POST', '/api/sessions', { environment, selection, message, images })
+		await request('POST', '/api/sessions', { environment, selection, group, message, images })
 	).json();
+}
+
+export async function placeSession(id: string, group: string | null): Promise<void> {
+	await request('PUT', `/api/sessions/${id}/group`, { group });
+}
+
+export async function createGroup(name: string): Promise<Group> {
+	return (await request('POST', '/api/groups', { name })).json();
+}
+
+export async function renameGroup(id: string, name: string): Promise<void> {
+	await request('PATCH', `/api/groups/${id}`, { name });
+}
+
+export async function deleteGroup(id: string): Promise<void> {
+	await request('DELETE', `/api/groups/${id}`);
 }
 
 export async function patchSession(

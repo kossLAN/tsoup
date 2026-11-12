@@ -45,9 +45,10 @@ impl IntoResponse for ApiError {
 impl From<SessionError> for ApiError {
     fn from(error: SessionError) -> Self {
         let status = match error {
-            SessionError::InvalidFolder(_) => StatusCode::BAD_REQUEST,
+            SessionError::InvalidFolder(_) | SessionError::UnnamedGroup => StatusCode::BAD_REQUEST,
             SessionError::NotFound
             | SessionError::NoSuchNode
+            | SessionError::NoSuchGroup
             | SessionError::NoSuchAgent
             | SessionError::NoSuchQuestion => StatusCode::NOT_FOUND,
             SessionError::Busy

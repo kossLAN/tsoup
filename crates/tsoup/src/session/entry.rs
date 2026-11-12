@@ -125,6 +125,9 @@ pub enum Record {
     Selection {
         selection: Selection,
     },
+    Group {
+        group: Option<Uuid>,
+    },
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -178,6 +181,9 @@ pub enum Event {
     },
     Title {
         title: String,
+    },
+    Group {
+        group: Option<Uuid>,
     },
     Cleared,
     Rewind {

@@ -3,6 +3,7 @@ import {
 	createSession,
 	deleteSession,
 	listEvents,
+	type Group,
 	type ListEvent,
 	type NewEnvironment,
 	type NodeSummary,
@@ -15,6 +16,7 @@ const UNSEEN_KEY = 'tsoup.unseen';
 
 class SessionList {
 	items = $state<SessionSummary[]>([]);
+	groups = $state<Group[]>([]);
 	nodes = $state<NodeSummary[]>([]);
 	loaded = $state(false);
 	unseen = new SvelteSet<string>(load());
@@ -41,9 +43,10 @@ class SessionList {
 		environment: NewEnvironment,
 		selection: Selection,
 		message: string,
-		images: Image[]
+		images: Image[],
+		group: string | null
 	): Promise<SessionSummary> {
-		const session = await createSession(environment, selection, message, images);
+		const session = await createSession(environment, selection, message, images, group);
 		this.#unconfirmed.add(session.id);
 		this.#add(session);
 		return session;
@@ -78,6 +81,7 @@ class SessionList {
 				for (const id of ids) this.#unconfirmed.delete(id);
 				this.items = event.sessions;
 				for (const session of unconfirmed) this.#add(session);
+				this.groups = event.groups;
 				this.nodes = event.nodes;
 				this.loaded = true;
 				save(this.unseen);
@@ -102,6 +106,14 @@ class SessionList {
 				save(this.unseen);
 				break;
 			}
+			case 'group': {
+				const session = this.items.find((session) => session.id === event.id);
+				if (session) session.group = event.group;
+				break;
+			}
+			case 'groups':
+				this.groups = event.groups;
+				break;
 			case 'environment': {
 				const session = this.items.find((session) => session.id === event.id);
 				if (session) session.environment = event.environment;

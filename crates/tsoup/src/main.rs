@@ -118,7 +118,8 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
             .context("loading settings")?,
     );
     let builder = Arc::new(Builder::new(uid, Arc::clone(&settings)));
-    let sessions = Sessions::load(sessions_dir, runtime_dir, builder)
+    let groups = cli.data_dir.join("groups.json");
+    let sessions = Sessions::load(sessions_dir, runtime_dir, groups, builder)
         .await
         .context("loading sessions")?;
     let claude_code = Arc::new(tsoup_claude_code::Cli::new(

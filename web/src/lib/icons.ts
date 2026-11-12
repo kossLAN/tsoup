@@ -16,6 +16,8 @@ export { default as DotsThreeIcon } from 'phosphor-svelte/lib/DotsThreeIcon';
 export { default as FileTextIcon } from 'phosphor-svelte/lib/FileTextIcon';
 export { default as FloppyDiskIcon } from 'phosphor-svelte/lib/FloppyDiskIcon';
 export { default as FolderIcon } from 'phosphor-svelte/lib/FolderIcon';
+export { default as FolderMinusIcon } from 'phosphor-svelte/lib/FolderMinusIcon';
+export { default as FolderOpenIcon } from 'phosphor-svelte/lib/FolderOpenIcon';
 export { default as FolderPlusIcon } from 'phosphor-svelte/lib/FolderPlusIcon';
 export { default as GearSixIcon } from 'phosphor-svelte/lib/GearSixIcon';
 export { default as MonitorIcon } from 'phosphor-svelte/lib/MonitorIcon';
