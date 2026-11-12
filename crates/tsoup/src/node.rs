@@ -1,23 +1,24 @@
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use serde::Serialize;
 use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::RwLock;
 use tokio_util::sync::CancellationToken;
-use tsoup_proto::node::{self as protocol, Request, Response, StoredSession};
+use tsoup_proto::node::{self as protocol, Request, Response};
 use tsoup_proto::rpc::SILENCE;
 use tsoup_proto::{McpListing, McpTool, mcp, workspace};
 use tsoup_rpc::{Connection, RpcError};
-use uuid::Uuid;
 
-use crate::session::{Record, Sessions};
+use crate::session::{Placement, Sessions};
 
 #[derive(Debug, thiserror::Error)]
 pub enum NodeError {
     #[error("the node {0}")]
     Rpc(#[from] RpcError),
-    #[error("a session record is malformed: {0}")]
-    Record(#[from] serde_json::Error),
+    #[error("the node {0} is not connected")]
+    Offline(String),
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -25,6 +26,8 @@ pub struct NodeSummary {
     pub name: String,
     pub directory: String,
 }
+
+pub type Nodes = RwLock<BTreeMap<String, Arc<Node>>>;
 
 pub struct Node {
     pub name: String,
@@ -35,13 +38,24 @@ pub struct Node {
 }
 
 pub struct Folder {
-    pub node: Arc<Node>,
-    pub name: String,
+    pub placement: Placement,
+    nodes: Arc<Nodes>,
 }
 
 impl Folder {
-    pub fn path(&self) -> PathBuf {
-        Path::new(&self.node.directory).join(&self.name)
+    pub fn new(nodes: Arc<Nodes>, placement: Placement) -> Self {
+        Self { placement, nodes }
+    }
+
+    pub async fn connected(&self) -> Result<Arc<Node>, NodeError> {
+        let name = &self.placement.name;
+
+        self.nodes
+            .read()
+            .await
+            .get(name)
+            .cloned()
+            .ok_or_else(|| NodeError::Offline(name.clone()))
     }
 }
 
@@ -49,11 +63,10 @@ impl Node {
     async fn connect(
         name: String,
         connection: Connection<protocol::Node>,
-    ) -> Result<(Self, Vec<StoredSession>), NodeError> {
+    ) -> Result<Self, NodeError> {
         let Response::Hello {
             directory,
             sandboxed,
-            sessions,
         } = connection.request(Request::Hello).await?
         else {
             return Err(RpcError::UnexpectedResponse.into());
@@ -66,14 +79,17 @@ impl Node {
             return Err(RpcError::UnexpectedResponse.into());
         };
 
-        let node = Self {
+        Ok(Self {
             name,
             directory,
             sandboxed,
             tools,
             connection,
-        };
-        Ok((node, sessions))
+        })
+    }
+
+    pub fn path(&self, folder: &str) -> PathBuf {
+        Path::new(&self.directory).join(folder)
     }
 
     pub fn summary(&self) -> NodeSummary {
@@ -90,40 +106,13 @@ impl Node {
         }
     }
 
-    pub async fn records(&self, session: Uuid) -> Result<Vec<Record>, NodeError> {
-        let mut log = Vec::new();
-        let mut offset = 0;
-
-        loop {
-            let request = Request::Load { session, offset };
-            let Response::Records { records, next } = self.connection.request(request).await?
-            else {
-                return Err(RpcError::UnexpectedResponse.into());
-            };
-
-            for record in records {
-                log.push(serde_json::from_value(record)?);
-            }
-
-            match next {
-                Some(next) => offset = next,
-                None => return Ok(log),
-            }
-        }
-    }
-
-    pub async fn create(&self, session: Uuid, folder: &str) -> Result<(), NodeError> {
+    pub async fn create(&self, folder: &str) -> Result<(), NodeError> {
         let folder = folder.to_owned();
-        self.done(Request::Create { session, folder }).await
-    }
 
-    pub async fn append(&self, session: Uuid, record: &Record) -> Result<(), NodeError> {
-        let record = serde_json::to_value(record)?;
-        self.done(Request::Append { session, record }).await
-    }
-
-    pub async fn delete(&self, session: Uuid) -> Result<(), NodeError> {
-        self.done(Request::Delete { session }).await
+        match self.connection.request(Request::Create { folder }).await? {
+            Response::Done => Ok(()),
+            _ => Err(RpcError::UnexpectedResponse.into()),
+        }
     }
 
     pub async fn workspace(
@@ -149,13 +138,6 @@ impl Node {
             _ => Err(RpcError::UnexpectedResponse.into()),
         }
     }
-
-    async fn done(&self, request: Request) -> Result<(), NodeError> {
-        match self.connection.request(request).await? {
-            Response::Done => Ok(()),
-            _ => Err(RpcError::UnexpectedResponse.into()),
-        }
-    }
 }
 
 pub async fn serve<T>(io: T, name: String, sessions: Arc<Sessions>, shutdown: CancellationToken)
@@ -163,8 +145,8 @@ where
     T: AsyncRead + AsyncWrite + Unpin + Send + 'static,
 {
     let connect = Node::connect(name, Connection::open(io));
-    let (node, stored) = match tokio::time::timeout(SILENCE, connect).await {
-        Ok(Ok((node, stored))) => (Arc::new(node), stored),
+    let node = match tokio::time::timeout(SILENCE, connect).await {
+        Ok(Ok(node)) => Arc::new(node),
         Ok(Err(error)) => {
             tracing::warn!(%error, "a node failed to connect");
             return;
@@ -175,7 +157,7 @@ where
         },
     };
 
-    if let Err(error) = sessions.attach(Arc::clone(&node), stored).await {
+    if let Err(error) = sessions.attach(Arc::clone(&node)).await {
         tracing::warn!(%error, "refusing a node");
         return;
     }

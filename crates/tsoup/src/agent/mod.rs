@@ -238,7 +238,7 @@ impl Agent {
             .window(provider.id, &*llm, &model.name)
             .await
             .unwrap_or(settings.compaction.window);
-        let system = self.system(&settings, &session.environment, scope).await;
+        let system = self.system(&settings, &session.environment, scope).await?;
 
         Ok(Turn {
             llm,
@@ -402,11 +402,19 @@ impl Agent {
         models.iter().find(|listed| listed.name == model)?.context
     }
 
-    async fn system(&self, settings: &Settings, environment: &Environment, scope: Scope) -> String {
+    async fn system(
+        &self,
+        settings: &Settings,
+        environment: &Environment,
+        scope: Scope,
+    ) -> Result<String, SessionError> {
         let prompts = &settings.prompts;
         let mut system = match environment {
             Environment::Sandbox(_) => prompt::sandbox(prompts.sandbox(), self.modules().await),
-            Environment::Node(folder) => prompt::node(prompts.node(), folder),
+            Environment::Node(folder) => {
+                let node = folder.connected().await?;
+                prompt::node(prompts.node(), &node, &folder.placement.folder)
+            },
         };
 
         if scope.depth > 0 {
@@ -426,7 +434,7 @@ impl Agent {
             system.push_str(&prompt::models(&models));
         }
 
-        system
+        Ok(system)
     }
 
     async fn modules(&self) -> &str {

@@ -1,4 +1,4 @@
-use crate::node::Folder;
+use crate::node::Node;
 
 pub const COMPACT: &str = "The conversation is about to run out of context, so it will be replaced by a summary you write now.
 Do not call any tools, reply only with the summary.
@@ -35,16 +35,12 @@ read_file, write_file and edit_file work inside {directory} only.
 What you do there happens on the real machine and persists,
 so ask the user before doing anything destructive or hard to undo.";
 
-pub fn node(prompt: &str, folder: &Folder) -> String {
-    let access = if folder.node.sandboxed {
-        CONFINED
-    } else {
-        UNCONFINED
-    };
+pub fn node(prompt: &str, node: &Node, folder: &str) -> String {
+    let access = if node.sandboxed { CONFINED } else { UNCONFINED };
 
     format!("{prompt}\n\n{access}")
-        .replace("{name}", &folder.node.name)
-        .replace("{directory}", &folder.path().display().to_string())
+        .replace("{name}", &node.name)
+        .replace("{directory}", &node.path(folder).display().to_string())
 }
 
 pub fn models(labels: &[String]) -> String {

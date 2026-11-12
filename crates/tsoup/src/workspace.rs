@@ -1,4 +1,3 @@
-use std::future;
 use std::io;
 use std::path::Path;
 
@@ -143,15 +142,22 @@ impl Workspace for Sandbox {
 
 impl Workspace for Folder {
     async fn run(&self, request: Request) -> Result<Response, WorkspaceError> {
-        Ok(self.node.workspace(&self.name, request).await?)
+        Ok(self
+            .connected()
+            .await?
+            .workspace(&self.placement.folder, request)
+            .await?)
     }
 
     async fn mcp(&self, request: mcp::Request) -> Result<mcp::Response, WorkspaceError> {
-        Ok(self.node.mcp(request).await?)
+        Ok(self.connected().await?.mcp(request).await?)
     }
 
-    fn mcp_tools(&self) -> impl Future<Output = Vec<McpTool>> + Send {
-        future::ready(self.node.tools.clone())
+    async fn mcp_tools(&self) -> Vec<McpTool> {
+        self.connected()
+            .await
+            .map(|node| node.tools.clone())
+            .unwrap_or_default()
     }
 }
 

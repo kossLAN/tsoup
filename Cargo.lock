@@ -2575,14 +2575,12 @@ dependencies = [
  "libc",
  "reqwest",
  "serde",
- "serde_json",
  "tokio",
  "tracing",
  "tracing-subscriber",
  "tsoup-proto",
  "tsoup-rpc",
  "tsoup-workspace",
- "uuid",
 ]
 
 [[package]]

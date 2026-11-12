@@ -7,11 +7,8 @@ use tsoup_rpc::Handler;
 use tsoup_workspace::mcp::Mcp;
 use tsoup_workspace::sandbox::Sandbox;
 
-use crate::store::{Page, Store};
-
 pub struct Node {
     directory: PathBuf,
-    store: Store,
     mcp: Mcp,
     sandbox: Option<Sandbox>,
 }
@@ -19,7 +16,6 @@ pub struct Node {
 impl Node {
     pub async fn start(
         directory: PathBuf,
-        store: Store,
         mcp_config: Option<&Path>,
         sandbox: Option<Sandbox>,
     ) -> Self {
@@ -30,7 +26,6 @@ impl Node {
 
         Self {
             directory,
-            store,
             mcp,
             sandbox,
         }
@@ -69,26 +64,12 @@ impl Handler for Node {
             Request::Hello => Response::Hello {
                 directory: self.directory.display().to_string(),
                 sandboxed: self.sandbox.is_some(),
-                sessions: self.store.list().await?,
             },
             Request::Folders => Response::Folders {
                 folders: self.folders().await?,
             },
-            Request::Load { session, offset } => {
-                let Page { records, next } = self.store.load(session, offset).await?;
-                Response::Records { records, next }
-            },
-            Request::Create { session, folder } => {
+            Request::Create { folder } => {
                 tokio::fs::create_dir_all(self.folder(&folder)?).await?;
-                self.store.create(session, folder).await?;
-                Response::Done
-            },
-            Request::Append { session, record } => {
-                self.store.append(session, &record).await?;
-                Response::Done
-            },
-            Request::Delete { session } => {
-                self.store.delete(session).await?;
                 Response::Done
             },
             Request::Workspace { folder, request } => {

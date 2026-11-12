@@ -1,7 +1,6 @@
 mod connection;
 mod mount;
 mod node;
-mod store;
 
 use std::io::{self, Write as _};
 use std::path::PathBuf;
@@ -18,7 +17,6 @@ use tsoup_proto::node::PROTOCOL;
 use tsoup_workspace::sandbox::Sandbox;
 
 use self::node::Node;
-use self::store::Store;
 
 // fuser warns about every operation the mount leaves to the kernel.
 const LOG_FILTER: &str = "info,fuser=error";
@@ -55,7 +53,7 @@ struct Cli {
     #[arg(
         long,
         env = "TSOUP_NODE_DATA_DIR",
-        help = "Where sessions are stored, defaults to $XDG_DATA_HOME/tsoup-node"
+        help = "Where the sandbox keeps each folder's home directory and /tmp, defaults to $XDG_DATA_HOME/tsoup-node"
     )]
     data_dir: Option<PathBuf>,
 
@@ -113,9 +111,6 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         .data_dir
         .or_else(default_data_dir)
         .context("set --data-dir, XDG_DATA_HOME or HOME")?;
-    let store = Store::open(data_dir.join("sessions"))
-        .await
-        .with_context(|| format!("opening {}", data_dir.display()))?;
 
     let url = endpoint(&cli.server, &["api", "nodes", &name])?;
     let share = endpoint(&cli.server, &["api", "share"])?;
@@ -124,7 +119,7 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let sandbox = cli
         .sandbox
         .then(|| Sandbox::new(data_dir.join("sandboxes")));
-    let node = Arc::new(Node::start(directory, store, cli.mcp_config.as_deref(), sandbox).await);
+    let node = Arc::new(Node::start(directory, cli.mcp_config.as_deref(), sandbox).await);
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
 

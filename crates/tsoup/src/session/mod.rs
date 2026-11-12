@@ -1,6 +1,7 @@
 mod entry;
 mod environment;
 mod groups;
+mod log;
 mod sandbox;
 mod thread;
 
@@ -14,19 +15,20 @@ use serde::Serialize;
 use tokio::sync::{Mutex, Notify, RwLock, broadcast, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
-use tsoup_proto::node::{StoredSession, valid_folder};
+use tsoup_proto::node::valid_folder;
 use uuid::Uuid;
 
 pub use self::entry::{
     Action, AgentState, AgentSummary, Context, Entry, Event, FileDiff, Question, Record,
 };
-pub use self::environment::{Environment, EnvironmentStatus, NewEnvironment};
+pub use self::environment::{Environment, EnvironmentStatus, NewEnvironment, Placement};
 pub use self::groups::Group;
 use self::groups::Groups;
+use self::log::Log;
 pub use self::sandbox::{Sandbox, WORKSPACE_DIR};
 pub use self::thread::EntryPage;
 use self::thread::{Pending, Thread};
-use crate::node::{Folder, Node, NodeError, NodeSummary};
+use crate::node::{Folder, Node, NodeError, NodeSummary, Nodes};
 use crate::settings::{ModelChoice, Selection};
 use crate::vm::Builder;
 
@@ -332,7 +334,7 @@ pub struct Sessions {
     builder: Arc<Builder>,
     by_id: RwLock<HashMap<Uuid, Arc<Session>>>,
     groups: Mutex<Groups>,
-    nodes: RwLock<BTreeMap<String, Arc<Node>>>,
+    nodes: Arc<Nodes>,
     changes: broadcast::Sender<ListEvent>,
 }
 
@@ -349,7 +351,7 @@ impl Sessions {
             builder,
             by_id: RwLock::default(),
             groups: Mutex::new(Groups::load(groups).await?),
-            nodes: RwLock::default(),
+            nodes: Arc::default(),
             changes: broadcast::channel(EVENT_BUFFER).0,
         };
         let mut dirs = tokio::fs::read_dir(&sessions.root).await?;
@@ -359,16 +361,7 @@ impl Sessions {
                 continue;
             };
 
-            let events = sessions.events(id);
-            let sandbox = Sandbox::open(
-                dir.path(),
-                sessions.sandbox_runtime(id),
-                Arc::clone(&sessions.builder),
-                events.clone(),
-            )
-            .await;
-
-            match Session::open(id, Environment::Sandbox(Arc::new(sandbox)), events).await {
+            match sessions.open(id, dir.path()).await {
                 Ok(session) => {
                     sessions.by_id.get_mut().insert(id, Arc::new(session));
                 },
@@ -377,6 +370,26 @@ impl Sessions {
         }
 
         Ok(sessions)
+    }
+
+    async fn open(&self, id: Uuid, dir: PathBuf) -> Result<Session, SessionError> {
+        let events = self.events(id);
+        let log = Log::open(&dir);
+
+        let environment = if let Some(placement) = Placement::open(&dir).await? {
+            Environment::Node(Folder::new(Arc::clone(&self.nodes), placement))
+        } else {
+            let sandbox = Sandbox::open(
+                dir,
+                self.sandbox_runtime(id),
+                Arc::clone(&self.builder),
+                events.clone(),
+            )
+            .await;
+            Environment::Sandbox(Arc::new(sandbox))
+        };
+
+        Session::open(id, environment, log, events).await
     }
 
     pub async fn list(&self) -> Vec<SessionSummary> {
@@ -436,14 +449,16 @@ impl Sessions {
     }
 
     pub async fn folders(&self, node: &str) -> Result<Vec<String>, SessionError> {
-        let node = self
-            .nodes
+        Ok(self.node(node).await?.folders().await?)
+    }
+
+    async fn node(&self, name: &str) -> Result<Arc<Node>, SessionError> {
+        self.nodes
             .read()
             .await
-            .get(node)
+            .get(name)
             .cloned()
-            .ok_or(SessionError::NoSuchNode)?;
-        Ok(node.folders().await?)
+            .ok_or(SessionError::NoSuchNode)
     }
 
     pub async fn create_group(&self, name: &str) -> Result<Group, SessionError> {
@@ -508,12 +523,12 @@ impl Sessions {
 
         let id = Uuid::now_v7();
         let events = self.events(id);
-        let nodes = self.nodes.read().await;
+        let dir = self.dir(id);
 
         let environment = match environment {
             NewEnvironment::Sandbox => {
                 let sandbox = Sandbox::create(
-                    self.root.join(id.to_string()),
+                    dir.clone(),
                     self.sandbox_runtime(id),
                     Arc::clone(&self.builder),
                     events.clone(),
@@ -521,21 +536,21 @@ impl Sessions {
                 .await?;
                 Environment::Sandbox(Arc::new(sandbox))
             },
-            NewEnvironment::Node { name, folder } => {
-                if !valid_folder(&folder) {
-                    return Err(SessionError::InvalidFolder(folder));
+            NewEnvironment::Node(placement) => {
+                if !valid_folder(&placement.folder) {
+                    return Err(SessionError::InvalidFolder(placement.folder));
                 }
 
-                let node = nodes.get(&name).ok_or(SessionError::NoSuchNode)?;
-                node.create(id, &folder).await?;
-                Environment::Node(Folder {
-                    node: Arc::clone(node),
-                    name: folder,
-                })
+                let node = self.node(&placement.name).await?;
+                node.create(&placement.folder).await?;
+                placement.create(&dir).await?;
+                Environment::Node(Folder::new(Arc::clone(&self.nodes), placement))
             },
         };
 
-        let session = Arc::new(Session::new(id, environment, SessionData::new(id), events));
+        let log = Log::create(&dir).await?;
+        let data = SessionData::new(id);
+        let session = Arc::new(Session::new(id, environment, log, data, events));
         session.select(selection).await?;
         session.place(group).await?;
         self.insert(Arc::clone(&session)).await;
@@ -551,41 +566,15 @@ impl Sessions {
             .ok_or(SessionError::NotFound)?;
         session.cancel_turn().await;
         let _ = self.changes.send(ListEvent::Removed { id });
-        session.environment.delete(id).await
+        session.environment.destroy().await;
+        Ok(tokio::fs::remove_dir_all(self.dir(id)).await?)
     }
 
-    pub async fn attach(
-        &self,
-        node: Arc<Node>,
-        stored: Vec<StoredSession>,
-    ) -> Result<(), SessionError> {
-        let mut opened = Vec::with_capacity(stored.len());
-
-        for StoredSession { id, folder } in stored {
-            let environment = Environment::Node(Folder {
-                node: Arc::clone(&node),
-                name: folder,
-            });
-
-            match Session::open(id, environment, self.events(id)).await {
-                Ok(session) => opened.push(session),
-                Err(error) => tracing::warn!(%id, %error, "skipping an unreadable session"),
-            }
-        }
-
+    pub async fn attach(&self, node: Arc<Node>) -> Result<(), SessionError> {
         let mut nodes = self.nodes.write().await;
 
         if nodes.contains_key(&node.name) {
             return Err(SessionError::NodeConnected(node.name.clone()));
-        }
-
-        for session in opened {
-            if self.by_id.read().await.contains_key(&session.id) {
-                tracing::warn!(id = %session.id, "skipping a node session whose id is taken");
-                continue;
-            }
-
-            self.insert(Arc::new(session)).await;
         }
 
         nodes.insert(node.name.clone(), node);
@@ -595,21 +584,16 @@ impl Sessions {
         Ok(())
     }
 
-    pub async fn detach(&self, node: &Arc<Node>) {
+    pub async fn detach(&self, node: &Node) {
         let mut nodes = self.nodes.write().await;
         nodes.remove(&node.name);
 
-        let removed: Vec<_> = self
-            .by_id
-            .write()
-            .await
-            .extract_if(|_, session| session.environment.runs_on(node))
-            .map(|(_, session)| session)
-            .collect();
+        let sessions: Vec<_> = self.by_id.read().await.values().cloned().collect();
 
-        for session in removed {
-            session.cancel_turn().await;
-            let _ = self.changes.send(ListEvent::Removed { id: session.id });
+        for session in sessions {
+            if session.environment.runs_on(node) {
+                session.cancel_turn().await;
+            }
         }
 
         let _ = self.changes.send(ListEvent::Nodes {
@@ -627,6 +611,10 @@ impl Sessions {
         Events::new(id, self.changes.clone())
     }
 
+    fn dir(&self, id: Uuid) -> PathBuf {
+        self.root.join(id.to_string())
+    }
+
     fn sandbox_runtime(&self, id: Uuid) -> PathBuf {
         self.runtime.join(id.to_string())
     }
@@ -639,16 +627,24 @@ fn summaries(nodes: &BTreeMap<String, Arc<Node>>) -> Vec<NodeSummary> {
 pub struct Session {
     pub id: Uuid,
     pub environment: Environment,
+    log: Log,
     data: Mutex<SessionData>,
     events: Events,
     turn: Mutex<Option<JoinHandle<()>>>,
 }
 
 impl Session {
-    fn new(id: Uuid, environment: Environment, data: SessionData, events: Events) -> Self {
+    fn new(
+        id: Uuid,
+        environment: Environment,
+        log: Log,
+        data: SessionData,
+        events: Events,
+    ) -> Self {
         Self {
             id,
             environment,
+            log,
             data: Mutex::new(data),
             events,
             turn: Mutex::new(None),
@@ -658,10 +654,11 @@ impl Session {
     async fn open(
         id: Uuid,
         environment: Environment,
+        log: Log,
         events: Events,
     ) -> Result<Self, SessionError> {
-        let data = SessionData::replay(id, environment.records(id).await?);
-        Ok(Self::new(id, environment, data, events))
+        let data = SessionData::replay(id, log.records().await?);
+        Ok(Self::new(id, environment, log, data, events))
     }
 
     pub fn sandbox(&self) -> Result<&Arc<Sandbox>, SessionError> {
@@ -1020,7 +1017,7 @@ impl Session {
     }
 
     async fn record(&self, data: &mut SessionData, record: Record) -> Result<(), SessionError> {
-        self.environment.append(self.id, &record).await?;
+        self.log.append(&record).await?;
 
         if let Some(event) = data.apply(record) {
             self.emit(event);
