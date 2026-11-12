@@ -65,6 +65,7 @@
 	let scroller: HTMLElement;
 	let content: HTMLElement;
 	let pinned = true;
+	let top = 0;
 	let anchor: number | null = null;
 	let end = 0;
 	let waiting = 0;
@@ -128,8 +129,13 @@
 		if (pinned) scroller.scrollTop = scroller.scrollHeight;
 	}
 
+	// The scroll event from follow() lands a frame later, after fonts or images may have grown the
+	// content, so only scrolling up unpins.
 	function scrolled() {
-		pinned = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 40;
+		const position = scroller.scrollTop;
+		if (scroller.scrollHeight - position - scroller.clientHeight < 40) pinned = true;
+		else if (position < top) pinned = false;
+		top = position;
 		older();
 	}
 </script>
