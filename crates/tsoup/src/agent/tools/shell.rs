@@ -1,3 +1,5 @@
+use std::num::NonZeroU64;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 use tsoup_proto::Exit;
@@ -18,6 +20,11 @@ pub struct Arguments {
     )]
     #[serde(default)]
     background: bool,
+    #[schemars(
+        description = "Seconds the command may run before it is killed, 600 when omitted. Raise it for a long build or job instead of polling for it with sleep, lower it for a command that should be quick."
+    )]
+    #[serde(default)]
+    timeout: Option<NonZeroU64>,
 }
 
 impl<E: Workspace> Tool<E> for Shell {
@@ -33,6 +40,7 @@ impl<E: Workspace> Tool<E> for Shell {
         Arguments {
             command,
             background,
+            timeout,
         }: Arguments,
     ) -> Result<Outcome, ToolError> {
         if background {
@@ -40,10 +48,11 @@ impl<E: Workspace> Tool<E> for Shell {
             return Ok(Outcome::text("started in the background"));
         }
 
+        let timeout = timeout.map_or(TIMEOUT_SECS, NonZeroU64::get);
         let exit = environment
-            .exec(command, TIMEOUT_SECS)
+            .exec(command, timeout)
             .await?
-            .ok_or(ToolError::TimedOut(TIMEOUT_SECS))?;
+            .ok_or(ToolError::TimedOut(timeout))?;
 
         Ok(Outcome {
             error: exit.code != Some(0),

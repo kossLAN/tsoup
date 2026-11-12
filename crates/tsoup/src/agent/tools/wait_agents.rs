@@ -1,3 +1,6 @@
+use std::num::NonZeroU64;
+use std::time::Duration;
+
 use schemars::JsonSchema;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -15,6 +18,11 @@ pub struct Arguments {
     )]
     #[serde(default)]
     agents: Vec<Uuid>,
+    #[schemars(
+        description = "Seconds to wait at most, omit it to wait until they finish. Subagents still running when it runs out keep working, so use it to check on them or steer them in between."
+    )]
+    #[serde(default)]
+    timeout: Option<NonZeroU64>,
 }
 
 impl<E: Workspace> Tool<E> for WaitAgents {
@@ -22,7 +30,7 @@ impl<E: Workspace> Tool<E> for WaitAgents {
     const DESCRIPTION: &'static str =
         "Wait until your running subagents finish and return their reports.
 Call it after spawn_agent or resume_agent in the same message to start subagents and wait for them in one step.
-It stops waiting early when the user sends you a message.";
+It stops waiting early when a message arrives for you or the timeout runs out.";
 
     type Arguments = Arguments;
 
@@ -34,7 +42,7 @@ It stops waiting early when the user sends you a message.";
         &self,
         caller: &Caller<'_>,
         _environment: &E,
-        Arguments { agents }: Arguments,
+        Arguments { agents, timeout }: Arguments,
     ) -> Result<Outcome, ToolError> {
         let mine = caller.session.subagents(caller.id).await;
 
@@ -45,10 +53,18 @@ It stops waiting early when the user sends you a message.";
             return Err(ToolError::NotSubagent(stranger));
         }
 
-        caller
-            .subagents
-            .wait(caller.session, caller.id, &agents)
-            .await?;
+        let waiting = caller.subagents.wait(caller.session, caller.id, &agents);
+        let expired = match timeout {
+            Some(timeout) => {
+                let limit = Duration::from_secs(timeout.get());
+
+                match tokio::time::timeout(limit, waiting).await {
+                    Ok(waited) => waited.map(|()| None)?,
+                    Err(_) => Some(timeout),
+                }
+            },
+            None => waiting.await.map(|()| None)?,
+        };
         let (reports, running) = caller.subagents.take(&agents).await;
 
         let mut sections: Vec<_> = reports
@@ -57,9 +73,13 @@ It stops waiting early when the user sends you a message.";
             .collect();
 
         if !running.is_empty() {
+            let reason = expired.map_or_else(
+                || "a message arrived for you".to_owned(),
+                |timeout| format!("the {timeout} seconds ran out"),
+            );
             let running: Vec<_> = running.iter().map(Uuid::to_string).collect();
             sections.push(format!(
-                "stopped waiting because the user sent you a message, still running: {}",
+                "stopped waiting because {reason}, still running: {}",
                 running.join(", ")
             ));
         }
