@@ -1,4 +1,5 @@
-use std::iter;
+use std::borrow::Cow;
+use std::{iter, mem};
 
 use futures_util::future::BoxFuture;
 use reqwest::Method;
@@ -58,7 +59,7 @@ enum UserContent<'a> {
 #[derive(Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum Part<'a> {
-    Text { text: &'a str },
+    Text { text: Cow<'a, str> },
     ImageUrl { image_url: ImageUrl },
 }
 
@@ -84,9 +85,11 @@ impl<'a> From<&'a Message> for ChatMessage<'a> {
                     UserContent::Text(content)
                 } else {
                     UserContent::Parts(
-                        iter::once(Part::Text { text: content })
-                            .chain(images.iter().map(Part::from))
-                            .collect(),
+                        iter::once(Part::Text {
+                            text: content.into(),
+                        })
+                        .chain(images.iter().map(Part::from))
+                        .collect(),
                     )
                 },
             },
@@ -100,11 +103,49 @@ impl<'a> From<&'a Message> for ChatMessage<'a> {
             Message::Tool {
                 tool_call_id,
                 content,
+                ..
             } => Self::Tool {
                 tool_call_id,
                 content,
             },
         }
+    }
+}
+
+// Tool messages only carry text, so the images a run of tool calls returned follow it as a user
+// message.
+fn chat(messages: &[Message]) -> Vec<ChatMessage<'_>> {
+    let mut chat = Vec::new();
+    let mut returned = Vec::new();
+
+    for message in messages {
+        match message {
+            Message::Tool {
+                tool_call_id,
+                images,
+                ..
+            } if !images.is_empty() => {
+                returned.push(Part::Text {
+                    text: format!("The images tool call {tool_call_id} returned:").into(),
+                });
+                returned.extend(images.iter().map(Part::from));
+            },
+            Message::Tool { .. } => {},
+            _ => attach(&mut chat, &mut returned),
+        }
+
+        chat.push(ChatMessage::from(message));
+    }
+
+    attach(&mut chat, &mut returned);
+    chat
+}
+
+fn attach<'a>(chat: &mut Vec<ChatMessage<'a>>, returned: &mut Vec<Part<'a>>) {
+    if !returned.is_empty() {
+        chat.push(ChatMessage::User {
+            content: UserContent::Parts(mem::take(returned)),
+        });
     }
 }
 
@@ -206,7 +247,7 @@ impl Provider for ChatCompletions {
                 .json(&ChatRequest {
                     model,
                     reasoning_effort: effort,
-                    messages: messages.iter().map(ChatMessage::from).collect(),
+                    messages: chat(messages),
                     tools: tools
                         .iter()
                         .map(|function| ChatTool {

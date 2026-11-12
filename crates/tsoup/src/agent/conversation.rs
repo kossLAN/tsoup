@@ -31,12 +31,16 @@ pub fn conversation(system: &str, entries: &[Entry]) -> Vec<Message> {
                 });
             },
             Entry::Tool {
-                call_id, output, ..
+                call_id,
+                output,
+                images,
+                ..
             } => {
                 unanswered.retain(|id| id != call_id);
                 messages.push(Message::Tool {
                     tool_call_id: call_id.clone(),
                     content: output.clone(),
+                    images: images.clone(),
                 });
             },
             Entry::Compaction { summary } => {
@@ -86,5 +90,6 @@ fn interrupt(messages: &mut Vec<Message>, unanswered: &mut Vec<String>) {
     messages.extend(unanswered.drain(..).map(|tool_call_id| Message::Tool {
         tool_call_id,
         content: INTERRUPTED.to_owned(),
+        images: Vec::new(),
     }));
 }

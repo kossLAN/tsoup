@@ -27,7 +27,6 @@ use crate::settings::{Selection, SettingsPatch, SettingsStore, SettingsView};
 use crate::workspace::Workspace as _;
 
 const BODY_LIMIT: usize = 64 * 1024 * 1024;
-const IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
 #[derive(Clone)]
 pub struct AppState {
@@ -152,10 +151,7 @@ struct SessionPatch {
 }
 
 fn prompt(text: String, images: Vec<Image>) -> Result<Entry, ApiError> {
-    if let Some(image) = images
-        .iter()
-        .find(|image| !IMAGE_TYPES.contains(&image.media_type.as_str()))
-    {
+    if let Some(image) = images.iter().find(|image| !image.supported()) {
         return Err(ApiError::new(
             StatusCode::BAD_REQUEST,
             format!("{} images are not supported", image.media_type),

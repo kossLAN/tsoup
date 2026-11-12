@@ -27,6 +27,8 @@ pub enum Entry {
     Tool {
         call_id: String,
         output: String,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        images: Vec<Image>,
         error: bool,
         diff: Option<FileDiff>,
     },

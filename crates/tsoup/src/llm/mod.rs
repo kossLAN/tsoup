@@ -81,6 +81,7 @@ pub enum Message {
     Tool {
         tool_call_id: String,
         content: String,
+        images: Vec<Image>,
     },
 }
 
@@ -99,7 +100,13 @@ pub struct Image {
     pub data: String,
 }
 
+const IMAGE_TYPES: [&str; 4] = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
 impl Image {
+    pub fn supported(&self) -> bool {
+        IMAGE_TYPES.contains(&self.media_type.as_str())
+    }
+
     fn url(&self) -> String {
         format!("data:{};base64,{}", self.media_type, self.data)
     }

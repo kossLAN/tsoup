@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value};
 use tokio::process::Command;
 use tsoup_proto::mcp::{Request, Response};
-use tsoup_proto::{MAX_OUTPUT, McpFailure, McpListing, McpOutput, McpTool};
+use tsoup_proto::{MAX_OUTPUT, McpFailure, McpImage, McpListing, McpOutput, McpTool};
 
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -125,10 +125,7 @@ impl Mcp {
             .await
             .map_err(|_| CallError::TimedOut)??;
 
-        Ok(McpOutput {
-            output: flatten(&result.content),
-            error: result.is_error.unwrap_or(false),
-        })
+        Ok(flatten(result.content, result.is_error.unwrap_or(false)))
     }
 }
 
@@ -150,31 +147,55 @@ async fn connect(
         .map_err(|error| StartError::Initialize(Box::new(error)))
 }
 
-fn flatten(content: &[ContentBlock]) -> String {
-    let mut output = content
-        .iter()
-        .map(|block| match block {
-            ContentBlock::Text(text) => text.text.clone(),
-            ContentBlock::Image(image) => format!("[image: {}]", image.mime_type),
-            ContentBlock::Audio(audio) => format!("[audio: {}]", audio.mime_type),
+fn flatten(content: Vec<ContentBlock>, error: bool) -> McpOutput {
+    let mut text = Vec::new();
+    let mut images = Vec::new();
+
+    for block in content {
+        match block {
+            ContentBlock::Text(content) => text.push(content.text),
+            ContentBlock::Image(image) => images.push(McpImage {
+                media_type: image.mime_type,
+                data: image.data,
+            }),
+            ContentBlock::Audio(audio) => text.push(format!("[audio: {}]", audio.mime_type)),
             ContentBlock::Resource(EmbeddedResource {
-                resource: ResourceContents::TextResourceContents { text, .. },
+                resource: ResourceContents::TextResourceContents { text: content, .. },
                 ..
-            }) => text.clone(),
+            }) => text.push(content),
+            ContentBlock::Resource(EmbeddedResource {
+                resource:
+                    ResourceContents::BlobResourceContents {
+                        mime_type: Some(media_type),
+                        blob,
+                        ..
+                    },
+                ..
+            }) if media_type.starts_with("image/") => images.push(McpImage {
+                media_type,
+                data: blob,
+            }),
             ContentBlock::Resource(EmbeddedResource {
                 resource: ResourceContents::BlobResourceContents { uri, .. },
                 ..
-            }) => format!("[resource: {uri}]"),
-            ContentBlock::ResourceLink(resource) => format!("[resource: {}]", resource.uri),
-            _ => String::from("[unsupported content]"),
-        })
-        .collect::<Vec<_>>()
-        .join("\n");
+            }) => text.push(format!("[resource: {uri}]")),
+            ContentBlock::ResourceLink(resource) => {
+                text.push(format!("[resource: {}]", resource.uri));
+            },
+            _ => text.push(String::from("[unsupported content]")),
+        }
+    }
 
+    let mut output = text.join("\n");
     let end = (0..=output.len().min(MAX_OUTPUT))
         .rev()
         .find(|&index| output.is_char_boundary(index))
         .unwrap_or(0);
     output.truncate(end);
-    output
+
+    McpOutput {
+        output,
+        images,
+        error,
+    }
 }

@@ -93,8 +93,33 @@ enum Block<'a> {
     },
     ToolResult {
         tool_use_id: &'a str,
-        content: &'a str,
+        content: ToolContent<'a>,
     },
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum ToolContent<'a> {
+    Text(&'a str),
+    Blocks(Vec<Block<'a>>),
+}
+
+impl<'a> ToolContent<'a> {
+    fn new(content: &'a str, images: &'a [Image]) -> Self {
+        if images.is_empty() {
+            return Self::Text(content);
+        }
+
+        Self::Blocks(
+            (!content.is_empty())
+                .then_some(Block::Text { text: content })
+                .into_iter()
+                .chain(images.iter().map(|image| Block::Image {
+                    source: image.into(),
+                }))
+                .collect(),
+        )
+    }
 }
 
 #[derive(Serialize)]
@@ -260,11 +285,12 @@ impl<'a> Turn<'a> {
             Message::Tool {
                 tool_call_id,
                 content,
+                images,
             } => (
                 Role::User,
                 vec![Block::ToolResult {
                     tool_use_id: tool_call_id,
-                    content,
+                    content: ToolContent::new(content, images),
                 }],
             ),
         };

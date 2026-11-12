@@ -40,7 +40,14 @@ export type Entry =
 			tool_calls: ToolCall[];
 			context?: Context;
 	  }
-	| { kind: 'tool'; call_id: string; output: string; error: boolean; diff: FileDiff | null }
+	| {
+			kind: 'tool';
+			call_id: string;
+			output: string;
+			images?: Image[];
+			error: boolean;
+			diff: FileDiff | null;
+	  }
 	| { kind: 'compaction'; summary: string }
 	| ReportEntry;
 

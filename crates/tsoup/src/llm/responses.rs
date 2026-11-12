@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use super::stream::{Collector, Data, Events};
 use super::{
-    Effort, Endpoint, LlmError, Message, Model, OnProgress, Provider, Reply, ToolCall,
+    Effort, Endpoint, Image, LlmError, Message, Model, OnProgress, Provider, Reply, ToolCall,
     ToolDefinition, ToolKind, list_models, send,
 };
 
@@ -55,8 +55,15 @@ enum Item<'a> {
     },
     FunctionCallOutput {
         call_id: &'a str,
-        output: &'a str,
+        output: Output<'a>,
     },
+}
+
+#[derive(Serialize)]
+#[serde(untagged)]
+enum Output<'a> {
+    Text(&'a str),
+    Parts(Vec<InputPart<'a>>),
 }
 
 #[derive(Serialize)]
@@ -72,6 +79,14 @@ enum Role {
 enum InputPart<'a> {
     InputText { text: &'a str },
     InputImage { image_url: String },
+}
+
+impl From<&Image> for InputPart<'_> {
+    fn from(image: &Image) -> Self {
+        Self::InputImage {
+            image_url: image.url(),
+        }
+    }
 }
 
 #[derive(Serialize)]
@@ -163,9 +178,7 @@ fn items(message: &Message) -> Vec<Item<'_>> {
         Message::User { content, images } => vec![Item::Input {
             role: Role::User,
             content: iter::once(InputPart::InputText { text: content })
-                .chain(images.iter().map(|image| InputPart::InputImage {
-                    image_url: image.url(),
-                }))
+                .chain(images.iter().map(InputPart::from))
                 .collect(),
         }],
         Message::Assistant {
@@ -182,9 +195,20 @@ fn items(message: &Message) -> Vec<Item<'_>> {
         Message::Tool {
             tool_call_id,
             content,
+            images,
         } => vec![Item::FunctionCallOutput {
             call_id: tool_call_id,
-            output: content,
+            output: if images.is_empty() {
+                Output::Text(content)
+            } else {
+                Output::Parts(
+                    (!content.is_empty())
+                        .then_some(InputPart::InputText { text: content })
+                        .into_iter()
+                        .chain(images.iter().map(InputPart::from))
+                        .collect(),
+                )
+            },
         }],
     }
 }

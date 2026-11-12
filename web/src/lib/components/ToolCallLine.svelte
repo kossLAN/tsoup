@@ -133,6 +133,18 @@
 		</span>
 	</button>
 
+	{#if result?.images?.length}
+		<div class="flex flex-wrap gap-1.5">
+			{#each result.images as image, position (position)}
+				<img
+					class="max-h-72 max-w-full rounded-control border border-light"
+					src="data:{image.media_type};base64,{image.data}"
+					alt="{label} result {position + 1}"
+				/>
+			{/each}
+		</div>
+	{/if}
+
 	{#if expanded}
 		{#if result?.diff}
 			<div class="max-h-105 overflow-y-auto rounded-control surface">

@@ -47,6 +47,7 @@ impl<E: Workspace> Tool<E> for Shell {
 
         Ok(Outcome {
             output: format_exit(&exit),
+            images: Vec::new(),
             error: exit.code != Some(0),
             diff: None,
         })

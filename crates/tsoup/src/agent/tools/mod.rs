@@ -46,7 +46,7 @@ use self::web_search::WebSearch;
 use self::write_file::WriteFile;
 use super::Agent;
 use super::subagents::Subagents;
-use crate::llm::{FunctionCall, ToolCall, ToolDefinition};
+use crate::llm::{FunctionCall, Image, ToolCall, ToolDefinition};
 use crate::node::Folder;
 use crate::session::{Environment, FileDiff, Sandbox, Session, SessionError};
 use crate::vm::VmError;
@@ -92,6 +92,7 @@ pub enum ToolError {
 
 pub struct Outcome {
     pub output: String,
+    pub images: Vec<Image>,
     pub error: bool,
     pub diff: Option<FileDiff>,
 }
@@ -100,6 +101,7 @@ impl Outcome {
     pub fn text(output: impl Into<String>) -> Self {
         Self {
             output: output.into(),
+            images: Vec::new(),
             error: false,
             diff: None,
         }
@@ -114,6 +116,7 @@ impl Outcome {
 
         Self {
             output: format!("wrote {path}"),
+            images: Vec::new(),
             error: false,
             diff: Some(FileDiff {
                 path: path.to_owned(),
@@ -125,6 +128,7 @@ impl Outcome {
     fn failure(error: ToolError) -> Self {
         Self {
             output: error.to_string(),
+            images: Vec::new(),
             error: true,
             diff: None,
         }

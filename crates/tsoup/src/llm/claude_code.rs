@@ -51,6 +51,7 @@ fn tagged(message: &Message) -> Option<String> {
         Message::Tool {
             tool_call_id,
             content,
+            ..
         } => Some(format!(
             "<tool_result id=\"{tool_call_id}\">\n{content}\n</tool_result>"
         )),
@@ -67,7 +68,7 @@ fn failed(message: String) -> LlmError {
 
 fn images(message: &Message) -> &[Image] {
     match message {
-        Message::User { images, .. } => images,
+        Message::User { images, .. } | Message::Tool { images, .. } => images,
         _ => &[],
     }
 }

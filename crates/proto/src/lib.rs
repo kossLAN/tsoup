@@ -39,5 +39,13 @@ pub struct McpListing {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct McpOutput {
     pub output: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub images: Vec<McpImage>,
     pub error: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpImage {
+    pub media_type: String,
+    pub data: String,
 }

@@ -306,6 +306,7 @@ impl Agent {
                             Entry::Tool {
                                 call_id: call.id.clone(),
                                 output: outcome.output,
+                                images: outcome.images,
                                 error: outcome.error,
                                 diff: outcome.diff,
                             },
