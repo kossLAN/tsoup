@@ -31,7 +31,8 @@ for independent pieces of work or to keep long explorations out of your context.
 Its final report arrives as a message when it finishes.
 To wait for reports instead of working alongside, call wait_agents, never poll list_agents.
 If you end your turn while subagents run, you wait for them and continue with their reports.
-resume_agent takes the id to continue the subagent's work.";
+steer_agent takes the id to message the subagent while it runs,
+resume_agent to continue its work once it has finished.";
     const PARALLEL: bool = true;
 
     type Arguments = Arguments;

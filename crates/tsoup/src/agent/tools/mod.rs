@@ -12,6 +12,7 @@ mod set_actions;
 mod shell;
 mod show_preview;
 mod spawn_agent;
+mod steer_agent;
 mod wait_agents;
 mod web;
 mod web_fetch;
@@ -42,6 +43,7 @@ use self::set_actions::SetActions;
 use self::shell::Shell;
 use self::show_preview::ShowPreview;
 use self::spawn_agent::SpawnAgent;
+use self::steer_agent::SteerAgent;
 use self::wait_agents::WaitAgents;
 use self::web_fetch::WebFetch;
 use self::web_search::WebSearch;
@@ -342,6 +344,7 @@ impl Tools {
                 Box::new(WriteFile),
                 Box::new(EditFile),
                 Box::new(SpawnAgent),
+                Box::new(SteerAgent),
                 Box::new(ResumeAgent),
                 Box::new(ListAgents),
                 Box::new(WaitAgents),
@@ -356,6 +359,7 @@ impl Tools {
                 Box::new(WriteFile),
                 Box::new(EditFile),
                 Box::new(SpawnAgent),
+                Box::new(SteerAgent),
                 Box::new(ResumeAgent),
                 Box::new(ListAgents),
                 Box::new(WaitAgents),

@@ -36,6 +36,7 @@
 		web_search: ['searching', 'searched'],
 		web_fetch: ['fetching', 'fetched'],
 		spawn_agent: ['starting agent', 'started agent'],
+		steer_agent: ['steering agent', 'steered agent'],
 		resume_agent: ['resuming agent', 'resumed agent'],
 		list_agents: ['listing agents', 'listed agents'],
 		wait_agents: ['waiting for agents', 'waited for agents'],
