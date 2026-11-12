@@ -76,6 +76,15 @@ pub struct Collector<'a> {
 }
 
 #[derive(Default)]
+pub struct Counts {
+    pub input: Option<u64>,
+    pub output: Option<u64>,
+    pub cache_read: Option<u64>,
+    pub cache_write: Option<u64>,
+    pub reasoning: Option<u64>,
+}
+
+#[derive(Default)]
 struct Part {
     content: String,
     split: bool,
@@ -163,14 +172,33 @@ impl<'a> Collector<'a> {
         }
     }
 
-    pub fn usage(&mut self, input: Option<u64>, output: Option<u64>) {
-        if input.is_none() && output.is_none() {
+    pub fn usage(&mut self, counts: Counts) {
+        let reported = [
+            counts.input,
+            counts.output,
+            counts.cache_read,
+            counts.cache_write,
+            counts.reasoning,
+        ];
+
+        if reported.iter().all(Option::is_none) {
             return;
         }
 
         let usage = self.usage.get_or_insert_default();
-        usage.input = input.unwrap_or(usage.input);
-        usage.output = output.unwrap_or(usage.output);
+        let totals = [
+            &mut usage.input,
+            &mut usage.output,
+            &mut usage.cache_read,
+            &mut usage.cache_write,
+            &mut usage.reasoning,
+        ];
+
+        for (total, count) in totals.into_iter().zip(reported) {
+            if let Some(count) = count {
+                *total = count;
+            }
+        }
     }
 
     pub fn finish(self) -> Reply {

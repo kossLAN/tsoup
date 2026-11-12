@@ -5,7 +5,7 @@ use futures_util::future::BoxFuture;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
-use super::stream::{Collector, Data, Events};
+use super::stream::{Collector, Counts, Data, Events};
 use super::{
     Effort, Endpoint, Image, LlmError, Message, Model, OnProgress, Provider, Reply, ToolCall,
     ToolDefinition, ToolKind, list_models, send,
@@ -153,6 +153,34 @@ struct CompletedResponse {
 struct ResponseUsage {
     input_tokens: Option<u64>,
     output_tokens: Option<u64>,
+    input_tokens_details: Option<InputDetails>,
+    output_tokens_details: Option<OutputDetails>,
+}
+
+#[derive(Deserialize)]
+struct InputDetails {
+    cached_tokens: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct OutputDetails {
+    reasoning_tokens: Option<u64>,
+}
+
+impl From<ResponseUsage> for Counts {
+    fn from(usage: ResponseUsage) -> Self {
+        Self {
+            input: usage.input_tokens,
+            output: usage.output_tokens,
+            cache_read: usage
+                .input_tokens_details
+                .and_then(|details| details.cached_tokens),
+            cache_write: None,
+            reasoning: usage
+                .output_tokens_details
+                .and_then(|details| details.reasoning_tokens),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -254,7 +282,7 @@ impl StreamEvent {
             } => collector.tool_arguments(output_index, &delta),
             Self::Completed { response } => {
                 if let Some(usage) = response.usage {
-                    collector.usage(usage.input_tokens, usage.output_tokens);
+                    collector.usage(usage.into());
                 }
 
                 return Ok(ControlFlow::Break(()));

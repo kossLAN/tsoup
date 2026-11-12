@@ -22,6 +22,7 @@ use uuid::Uuid;
 
 pub use self::error::ApiError;
 use crate::agent::Agent;
+use crate::analytics::{self, Analytics, Report};
 use crate::llm::Image;
 use crate::session::{Entry, EntryPage, NewEnvironment, Session, SessionSummary, Sessions};
 use crate::settings::{Selection, SettingsPatch, SettingsStore, SettingsView};
@@ -34,6 +35,7 @@ pub struct AppState {
     sessions: Arc<Sessions>,
     agent: Arc<Agent>,
     settings: Arc<SettingsStore>,
+    analytics: Arc<Analytics>,
     claude_code: Arc<Cli>,
     shutdown: CancellationToken,
 }
@@ -43,6 +45,7 @@ impl AppState {
         sessions: Sessions,
         agent: Agent,
         settings: Arc<SettingsStore>,
+        analytics: Arc<Analytics>,
         claude_code: Arc<Cli>,
         shutdown: CancellationToken,
     ) -> Self {
@@ -50,6 +53,7 @@ impl AppState {
             sessions: Arc::new(sessions),
             agent: Arc::new(agent),
             settings,
+            analytics,
             claude_code,
             shutdown,
         }
@@ -69,6 +73,7 @@ pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/api/settings", get(get_settings).patch(update_settings))
         .route("/api/providers/{id}/models", get(list_models))
+        .route("/api/analytics", get(get_analytics))
         .route("/api/claude-code/account", get(claude_code::account))
         .route("/api/claude-code/usage", get(claude_code::usage))
         .route("/api/claude-code/login", post(claude_code::start_login))
@@ -189,6 +194,13 @@ async fn list_models(
         .provider(id)
         .ok_or_else(|| ApiError::new(StatusCode::NOT_FOUND, "no such provider"))?;
     Ok(Json(state.agent.models(provider).await?))
+}
+
+async fn get_analytics(
+    State(state): State<AppState>,
+    Query(query): Query<analytics::Query>,
+) -> Json<Report> {
+    Json(state.analytics.report(query).await)
 }
 
 async fn list_sessions(State(state): State<AppState>) -> Json<Vec<SessionSummary>> {

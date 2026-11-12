@@ -7,6 +7,7 @@ mod tools;
 use std::collections::HashMap;
 use std::collections::hash_map::Entry as Listing;
 use std::sync::Arc;
+use std::time::Instant;
 
 use futures_util::future::join_all;
 use reqwest::Client;
@@ -16,8 +17,11 @@ use uuid::Uuid;
 
 use self::conversation::{context, conversation};
 use self::subagents::Subagents;
-use self::tools::{Caller, Scope, Tools};
-use crate::llm::{Effort, LlmError, Message, Model, Provider};
+use self::tools::{Caller, Outcome, Scope, Tools};
+use crate::analytics::{self, Analytics, Completion, Purpose, Request};
+use crate::llm::{
+    Effort, LlmError, Message, Model, OnProgress, Provider, Reply, ToolCall, ToolDefinition,
+};
 use crate::session::{Context, Entry, Environment, Event, Session, SessionError};
 use crate::settings::{ProviderSettings, Settings, SettingsStore};
 use crate::vm::describe;
@@ -44,6 +48,7 @@ pub struct Agent {
     http: Client,
     cli: Arc<Cli>,
     settings: Arc<SettingsStore>,
+    analytics: Arc<Analytics>,
     tools: Tools,
     modules: OnceCell<String>,
     catalog: Mutex<HashMap<Uuid, Vec<Model>>>,
@@ -51,6 +56,10 @@ pub struct Agent {
 
 struct Turn {
     llm: Box<dyn Provider>,
+    analytics: Arc<Analytics>,
+    session: Uuid,
+    subagent: bool,
+    provider: String,
     model: String,
     effort: Option<Effort>,
     system: String,
@@ -64,14 +73,50 @@ impl Turn {
     const fn full(&self, context: Context) -> bool {
         self.auto && context.used * 100 >= self.window * AUTO_COMPACT_PERCENT
     }
+
+    async fn complete(
+        &self,
+        purpose: Purpose,
+        messages: &[Message],
+        tools: &[ToolDefinition],
+        progress: &OnProgress<'_>,
+    ) -> Result<Reply, LlmError> {
+        let effort = match purpose {
+            Purpose::Turn | Purpose::Compaction => self.effort,
+            Purpose::Title => None,
+        };
+        let started = Instant::now();
+        let reply = self
+            .llm
+            .complete(&self.model, effort, messages, tools, progress)
+            .await;
+        let completion = reply.as_ref().ok().map(|reply| Completion {
+            duration: started.elapsed(),
+            usage: reply.usage.unwrap_or_default(),
+        });
+
+        self.analytics
+            .request(Request {
+                session: self.session,
+                subagent: self.subagent,
+                purpose,
+                provider: self.provider.clone(),
+                model: self.model.clone(),
+                completion,
+            })
+            .await;
+
+        reply
+    }
 }
 
 impl Agent {
-    pub fn new(settings: Arc<SettingsStore>, cli: Arc<Cli>) -> Self {
+    pub fn new(settings: Arc<SettingsStore>, cli: Arc<Cli>, analytics: Arc<Analytics>) -> Self {
         Self {
             http: Client::default(),
             cli,
             settings,
+            analytics,
             tools: Tools::new(),
             modules: OnceCell::new(),
             catalog: Mutex::default(),
@@ -114,8 +159,7 @@ impl Agent {
                 Message::user(text),
             ];
             let reply = turn
-                .llm
-                .complete(&turn.model, None, &messages, &[], &|_| {})
+                .complete(Purpose::Title, &messages, &[], &|_| {})
                 .await?;
 
             if let Some(title) = reply.content {
@@ -198,6 +242,10 @@ impl Agent {
 
         Ok(Turn {
             llm,
+            analytics: Arc::clone(&self.analytics),
+            session: session.id,
+            subagent: id != session.id,
+            provider: provider.name.clone(),
             model: model.name,
             effort,
             system,
@@ -249,8 +297,7 @@ impl Agent {
                 });
             };
             let reply = match turn
-                .llm
-                .complete(&turn.model, turn.effort, &messages, &tools, &report)
+                .complete(Purpose::Turn, &messages, &tools, &report)
                 .await
             {
                 Err(LlmError::Overflow) if !recovered => {
@@ -298,8 +345,7 @@ impl Agent {
             let mut summary = None;
 
             for batch in batches {
-                let outcomes =
-                    join_all(batch.iter().map(|call| self.tools.execute(&caller, call))).await;
+                let outcomes = join_all(batch.iter().map(|call| self.call(&caller, call))).await;
 
                 for (call, outcome) in batch.iter().zip(outcomes) {
                     summary = outcome.summary.or(summary);
@@ -322,6 +368,22 @@ impl Agent {
                 session.push(id, Entry::Compaction { summary }).await?;
             }
         }
+    }
+
+    async fn call(&self, caller: &Caller<'_>, call: &ToolCall) -> Outcome {
+        let started = Instant::now();
+        let outcome = self.tools.execute(caller, call).await;
+
+        self.analytics
+            .tool(analytics::ToolCall {
+                session: caller.session.id,
+                name: call.function.name.clone(),
+                duration: started.elapsed(),
+                failed: outcome.error,
+            })
+            .await;
+
+        outcome
     }
 
     async fn window(&self, provider: Uuid, llm: &dyn Provider, model: &str) -> Option<u64> {

@@ -36,6 +36,20 @@
 @layer base {
 	:root {
 		color-scheme: dark;
+
+		--series-1: #3987e5;
+		--series-2: #d95926;
+		--series-3: #199e70;
+		--series-4: #c98500;
+		--series-5: #d55181;
+		--series-6: #008300;
+		--series-other: #6f6f6f;
+
+		--heat-1: #184f95;
+		--heat-2: #256abf;
+		--heat-3: #3987e5;
+		--heat-4: #6da7ec;
+		--heat-5: #9ec5f4;
 	}
 
 	body {

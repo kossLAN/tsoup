@@ -152,6 +152,9 @@ pub struct Reply {
 pub struct Usage {
     pub input: u64,
     pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub reasoning: u64,
 }
 
 #[derive(Debug, Clone)]

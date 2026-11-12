@@ -6,7 +6,7 @@ use schemars::Schema;
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 
-use super::stream::{Collector, Data, Events};
+use super::stream::{Collector, Counts, Data, Events};
 use super::{
     Effort, Endpoint, Image, LlmError, Message, Model, OnProgress, Provider, Reply, ToolCall,
     ToolDefinition, list_models, send, system,
@@ -192,7 +192,13 @@ impl TokenUsage {
                 + self.cache_creation_input_tokens.unwrap_or(0)
                 + self.cache_read_input_tokens.unwrap_or(0)
         });
-        collector.usage(input, self.output_tokens);
+        collector.usage(Counts {
+            input,
+            output: self.output_tokens,
+            cache_read: self.cache_read_input_tokens,
+            cache_write: self.cache_creation_input_tokens,
+            reasoning: None,
+        });
     }
 }
 

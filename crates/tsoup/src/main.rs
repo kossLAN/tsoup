@@ -1,4 +1,5 @@
 mod agent;
+mod analytics;
 mod api;
 mod llm;
 mod node;
@@ -23,6 +24,7 @@ use tokio_util::sync::CancellationToken;
 use tracing_subscriber::EnvFilter;
 
 use self::agent::Agent;
+use self::analytics::Analytics;
 use self::api::AppState;
 use self::session::Sessions;
 use self::settings::SettingsStore;
@@ -126,9 +128,25 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         cli.claude_code,
         claude_code_dir,
     ));
-    let agent = Agent::new(Arc::clone(&settings), Arc::clone(&claude_code));
+    let analytics = Arc::new(
+        Analytics::load(cli.data_dir.join("analytics.jsonl"))
+            .await
+            .context("loading analytics")?,
+    );
+    let agent = Agent::new(
+        Arc::clone(&settings),
+        Arc::clone(&claude_code),
+        Arc::clone(&analytics),
+    );
     let shutdown = CancellationToken::new();
-    let state = AppState::new(sessions, agent, settings, claude_code, shutdown.clone());
+    let state = AppState::new(
+        sessions,
+        agent,
+        settings,
+        analytics,
+        claude_code,
+        shutdown.clone(),
+    );
 
     let listener = TcpListener::bind((cli.hostname.as_str(), cli.port))
         .await

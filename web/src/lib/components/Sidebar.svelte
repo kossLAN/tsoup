@@ -10,6 +10,7 @@
 		type SessionSummary
 	} from '$lib/api';
 	import {
+		ChartBarIcon,
 		CheckIcon,
 		DesktopTowerIcon,
 		DotsThreeIcon,
@@ -471,7 +472,17 @@
 				</div>
 			</nav>
 
-			<footer class="mt-auto p-1.5">
+			<footer class="mt-auto flex flex-col gap-0.5 p-1.5">
+				<a
+					class={[
+						'nav-item gap-2.5 px-1.75',
+						page.url.pathname.startsWith('/analytics') && 'bg-alternate-base'
+					]}
+					href="/analytics"
+				>
+					<ChartBarIcon size={16} />
+					Analytics
+				</a>
 				<a
 					class={[
 						'nav-item gap-2.5 px-1.75',

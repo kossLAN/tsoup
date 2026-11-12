@@ -2,6 +2,7 @@ use uuid::Uuid;
 
 use super::conversation::{conversation, trimmed};
 use super::{Agent, Turn, TurnError, prompt};
+use crate::analytics::Purpose;
 use crate::llm::{LlmError, Message};
 use crate::session::{Entry, Event, Session};
 
@@ -27,8 +28,7 @@ impl Agent {
             messages.push(Message::user(prompt::COMPACT));
 
             match turn
-                .llm
-                .complete(&turn.model, turn.effort, &messages, &tools, &|_| {})
+                .complete(Purpose::Compaction, &messages, &tools, &|_| {})
                 .await
             {
                 Ok(reply) => break reply.content.ok_or(TurnError::NoSummary)?,

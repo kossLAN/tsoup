@@ -381,6 +381,53 @@ export async function listModels(provider: string): Promise<string[]> {
 	return (await request('GET', `/api/providers/${provider}/models`)).json();
 }
 
+export type RequestTotals = {
+	requests: number;
+	failed: number;
+	input: number;
+	output: number;
+	cache_read: number;
+	cache_write: number;
+	reasoning: number;
+	duration_ms: number;
+};
+
+export type ToolTotals = {
+	calls: number;
+	failed: number;
+	duration_ms: number;
+};
+
+export type UsageTotals = {
+	requests: RequestTotals;
+	tools: ToolTotals;
+	sessions: number;
+};
+
+export type UsedModel = {
+	provider: string;
+	model: string;
+};
+
+export type Purpose = 'turn' | 'compaction' | 'title';
+
+export type Analytics = {
+	totals: UsageTotals;
+	previous: UsageTotals | null;
+	ranking: UsedModel[];
+	models: (UsedModel & RequestTotals)[];
+	days: (UsedModel & RequestTotals & { day: number })[];
+	hours: (RequestTotals & { weekday: number; hour: number })[];
+	kinds: (RequestTotals & { purpose: Purpose; subagent: boolean })[];
+	sessions: (RequestTotals & { session: string; last: number })[];
+	tools: (ToolTotals & { name: string })[];
+};
+
+export async function getAnalytics(since: number, utcOffsetMinutes: number): Promise<Analytics> {
+	const query = `since=${since}&utc_offset_minutes=${utcOffsetMinutes}`;
+	return (await request('GET', `/api/analytics?${query}`)).json();
+}
+
 export type ClaudeCodeAccount = {
 	signed_in: boolean;
 	email: string | null;

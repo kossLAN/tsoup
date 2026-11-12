@@ -5,7 +5,7 @@ use futures_util::future::BoxFuture;
 use reqwest::Method;
 use serde::{Deserialize, Serialize};
 
-use super::stream::{Collector, Data, Events};
+use super::stream::{Collector, Counts, Data, Events};
 use super::{
     Effort, Endpoint, Image, LlmError, Message, Model, OnProgress, Provider, Reply, ToolCall,
     ToolDefinition, ToolKind, list_models, send,
@@ -168,6 +168,34 @@ struct Chunk {
 struct ChunkUsage {
     prompt_tokens: Option<u64>,
     completion_tokens: Option<u64>,
+    prompt_tokens_details: Option<PromptDetails>,
+    completion_tokens_details: Option<CompletionDetails>,
+}
+
+#[derive(Deserialize)]
+struct PromptDetails {
+    cached_tokens: Option<u64>,
+}
+
+#[derive(Deserialize)]
+struct CompletionDetails {
+    reasoning_tokens: Option<u64>,
+}
+
+impl From<ChunkUsage> for Counts {
+    fn from(usage: ChunkUsage) -> Self {
+        Self {
+            input: usage.prompt_tokens,
+            output: usage.completion_tokens,
+            cache_read: usage
+                .prompt_tokens_details
+                .and_then(|details| details.cached_tokens),
+            cache_write: None,
+            reasoning: usage
+                .completion_tokens_details
+                .and_then(|details| details.reasoning_tokens),
+        }
+    }
 }
 
 #[derive(Deserialize)]
@@ -270,7 +298,7 @@ impl Provider for ChatCompletions {
                 }
 
                 if let Some(usage) = chunk.usage {
-                    collector.usage(usage.prompt_tokens, usage.completion_tokens);
+                    collector.usage(usage.into());
                 }
 
                 for choice in chunk.choices {
