@@ -52,6 +52,7 @@ pub struct Settings {
 #[serde(default)]
 pub struct Compaction {
     pub auto: bool,
+    pub tool: bool,
     pub window: u64,
 }
 
@@ -59,6 +60,7 @@ impl Default for Compaction {
     fn default() -> Self {
         Self {
             auto: true,
+            tool: true,
             window: DEFAULT_WINDOW,
         }
     }

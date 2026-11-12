@@ -46,10 +46,8 @@ impl<E: Workspace> Tool<E> for Shell {
             .ok_or(ToolError::TimedOut(TIMEOUT_SECS))?;
 
         Ok(Outcome {
-            output: format_exit(&exit),
-            images: Vec::new(),
             error: exit.code != Some(0),
-            diff: None,
+            ..Outcome::text(format_exit(&exit))
         })
     }
 }

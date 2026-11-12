@@ -306,6 +306,7 @@ export type Prompt = {
 
 export type Compaction = {
 	auto: boolean;
+	tool: boolean;
 	window: number;
 };
 

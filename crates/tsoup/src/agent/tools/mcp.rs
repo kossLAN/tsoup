@@ -61,9 +61,8 @@ where
     }
 
     Ok(Outcome {
-        output,
         images,
         error,
-        diff: None,
+        ..Outcome::text(output)
     })
 }

@@ -39,7 +39,8 @@
 		resume_agent: ['resuming agent', 'resumed agent'],
 		list_agents: ['listing agents', 'listed agents'],
 		wait_agents: ['waiting for agents', 'waited for agents'],
-		ask: ['asking', 'asked']
+		ask: ['asking', 'asked'],
+		compact: ['compacting', 'compacted']
 	};
 
 	const running = $derived(!result && pending);

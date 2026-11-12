@@ -212,6 +212,17 @@
 						onchange={(auto) => patch({ compaction: { ...compaction, auto } })}
 					/>
 				</div>
+				<div class="flex items-center gap-3 px-3 py-2.5">
+					{@render row(
+						'Let agents compact',
+						'Give agents the compact tool, to summarize the conversation themselves when it saves context'
+					)}
+					<Switch
+						checked={compaction.tool}
+						label="Let agents compact"
+						onchange={(tool) => patch({ compaction: { ...compaction, tool } })}
+					/>
+				</div>
 				<label class="flex items-center gap-3 px-3 py-2.5">
 					{@render row(
 						'Fallback context window',

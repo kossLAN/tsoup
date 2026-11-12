@@ -1,4 +1,5 @@
 mod ask;
+mod compact;
 mod create_vm;
 mod destroy_vm;
 mod edit_file;
@@ -29,6 +30,7 @@ use tsoup_proto::{MAX_OUTPUT, McpFailure};
 use uuid::Uuid;
 
 use self::ask::Ask;
+use self::compact::Compact;
 use self::create_vm::CreateVm;
 use self::destroy_vm::DestroyVm;
 use self::edit_file::EditFile;
@@ -86,6 +88,10 @@ pub enum ToolError {
     NotText(String),
     #[error("the search returned no results")]
     NoResults,
+    #[error("the summary is empty, write what is needed to carry on")]
+    NoSummary,
+    #[error("there is nothing to compact, the conversation was only just replaced by a summary")]
+    NothingToCompact,
     #[error(transparent)]
     Session(#[from] SessionError),
 }
@@ -95,6 +101,7 @@ pub struct Outcome {
     pub images: Vec<Image>,
     pub error: bool,
     pub diff: Option<FileDiff>,
+    pub summary: Option<String>,
 }
 
 impl Outcome {
@@ -104,6 +111,7 @@ impl Outcome {
             images: Vec::new(),
             error: false,
             diff: None,
+            summary: None,
         }
     }
 
@@ -115,22 +123,25 @@ impl Outcome {
             .to_string();
 
         Self {
-            output: format!("wrote {path}"),
-            images: Vec::new(),
-            error: false,
             diff: Some(FileDiff {
                 path: path.to_owned(),
                 patch: unified,
             }),
+            ..Self::text(format!("wrote {path}"))
+        }
+    }
+
+    fn compacted(summary: String) -> Self {
+        Self {
+            summary: Some(summary),
+            ..Self::text("the conversation is replaced by the summary")
         }
     }
 
     fn failure(error: ToolError) -> Self {
         Self {
-            output: error.to_string(),
-            images: Vec::new(),
             error: true,
-            diff: None,
+            ..Self::text(error.to_string())
         }
     }
 }
@@ -162,6 +173,7 @@ fn booted(failures: &[McpFailure]) -> Outcome {
 pub struct Scope {
     pub depth: usize,
     pub limit: usize,
+    pub compact: bool,
 }
 
 pub struct Caller<'a> {
@@ -334,6 +346,7 @@ impl Tools {
                 Box::new(ListAgents),
                 Box::new(WaitAgents),
                 Box::new(Ask),
+                Box::new(Compact),
                 Box::new(WebSearch(http.clone())),
                 Box::new(WebFetch(http.clone())),
             ]),
@@ -347,6 +360,7 @@ impl Tools {
                 Box::new(ListAgents),
                 Box::new(WaitAgents),
                 Box::new(Ask),
+                Box::new(Compact),
                 Box::new(WebSearch(http.clone())),
                 Box::new(WebFetch(http)),
             ]),

@@ -174,6 +174,7 @@ impl Agent {
         let scope = Scope {
             depth,
             limit: settings.subagents.limit(),
+            compact: settings.compaction.tool,
         };
         let effort = match settings.subagents.effort {
             Some(effort) if depth > 0 => Some(effort),
@@ -294,12 +295,14 @@ impl Agent {
             let batches = calls.chunk_by(|left, right| {
                 self.tools.parallel(session, left) && self.tools.parallel(session, right)
             });
+            let mut summary = None;
 
             for batch in batches {
                 let outcomes =
                     join_all(batch.iter().map(|call| self.tools.execute(&caller, call))).await;
 
                 for (call, outcome) in batch.iter().zip(outcomes) {
+                    summary = outcome.summary.or(summary);
                     session
                         .push(
                             id,
@@ -313,6 +316,10 @@ impl Agent {
                         )
                         .await?;
                 }
+            }
+
+            if let Some(summary) = summary {
+                session.push(id, Entry::Compaction { summary }).await?;
             }
         }
     }
