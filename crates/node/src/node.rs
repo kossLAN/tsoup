@@ -7,7 +7,7 @@ use tsoup_rpc::Handler;
 use tsoup_workspace::mcp::Mcp;
 use tsoup_workspace::sandbox::Sandbox;
 
-use crate::store::Store;
+use crate::store::{Page, Store};
 
 pub struct Node {
     directory: PathBuf,
@@ -74,8 +74,9 @@ impl Handler for Node {
             Request::Folders => Response::Folders {
                 folders: self.folders().await?,
             },
-            Request::Load { session } => Response::Records {
-                records: self.store.load(session).await?,
+            Request::Load { session, offset } => {
+                let Page { records, next } = self.store.load(session, offset).await?;
+                Response::Records { records, next }
             },
             Request::Create { session, folder } => {
                 tokio::fs::create_dir_all(self.folder(&folder)?).await?;

@@ -21,6 +21,7 @@ pub enum Request {
     Folders,
     Load {
         session: Uuid,
+        offset: u64,
     },
     Create {
         session: Uuid,
@@ -54,6 +55,7 @@ pub enum Response {
     },
     Records {
         records: Vec<Value>,
+        next: Option<u64>,
     },
     Workspace(workspace::Response),
     Mcp(mcp::Response),

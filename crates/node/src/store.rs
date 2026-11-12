@@ -1,19 +1,25 @@
-use std::io;
+use std::io::{self, SeekFrom};
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt as _;
+use tokio::fs::{File, OpenOptions};
+use tokio::io::{AsyncBufReadExt as _, AsyncSeekExt as _, AsyncWriteExt as _, BufReader};
 use tsoup_proto::node::StoredSession;
 use uuid::Uuid;
 
 const METADATA_FILE: &str = "session.json";
 const LOG_FILE: &str = "log.jsonl";
+const MAX_PAGE: u64 = 8 * 1024 * 1024;
 
 #[derive(Serialize, Deserialize)]
 struct Metadata {
     folder: String,
+}
+
+pub struct Page {
+    pub records: Vec<Value>,
+    pub next: Option<u64>,
 }
 
 pub struct Store {
@@ -44,12 +50,32 @@ impl Store {
         Ok(sessions)
     }
 
-    pub async fn load(&self, session: Uuid) -> io::Result<Vec<Value>> {
-        tokio::fs::read_to_string(self.path(session).join(LOG_FILE))
-            .await?
-            .lines()
-            .map(|line| serde_json::from_str(line).map_err(io::Error::from))
-            .collect()
+    pub async fn load(&self, session: Uuid, offset: u64) -> io::Result<Page> {
+        let mut log = File::open(self.path(session).join(LOG_FILE)).await?;
+        log.seek(SeekFrom::Start(offset)).await?;
+        let mut log = BufReader::new(log);
+
+        let mut records = Vec::new();
+        let mut line = String::new();
+        let mut end = offset;
+
+        let next = loop {
+            line.clear();
+            let length = log.read_line(&mut line).await? as u64;
+
+            if length == 0 {
+                break None;
+            }
+
+            if !records.is_empty() && end + length > offset + MAX_PAGE {
+                break Some(end);
+            }
+
+            records.push(serde_json::from_str(&line)?);
+            end += length;
+        };
+
+        Ok(Page { records, next })
     }
 
     pub async fn create(&self, session: Uuid, folder: String) -> io::Result<()> {

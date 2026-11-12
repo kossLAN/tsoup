@@ -91,12 +91,24 @@ impl Node {
     }
 
     pub async fn records(&self, session: Uuid) -> Result<Vec<Record>, NodeError> {
-        match self.connection.request(Request::Load { session }).await? {
-            Response::Records { records } => Ok(records
-                .into_iter()
-                .map(serde_json::from_value)
-                .collect::<Result<_, _>>()?),
-            _ => Err(RpcError::UnexpectedResponse.into()),
+        let mut log = Vec::new();
+        let mut offset = 0;
+
+        loop {
+            let request = Request::Load { session, offset };
+            let Response::Records { records, next } = self.connection.request(request).await?
+            else {
+                return Err(RpcError::UnexpectedResponse.into());
+            };
+
+            for record in records {
+                log.push(serde_json::from_value(record)?);
+            }
+
+            match next {
+                Some(next) => offset = next,
+                None => return Ok(log),
+            }
         }
     }
 
