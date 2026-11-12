@@ -49,6 +49,7 @@
 	const threshold = 400;
 
 	let scroller: HTMLElement;
+	let content: HTMLElement;
 	let pinned = true;
 	let anchor: number | null = null;
 	let end = 0;
@@ -71,10 +72,13 @@
 	});
 
 	$effect(() => {
-		void busy;
-		void failure;
-		void draft?.text;
-		void draft?.thinking;
+		const observer = new ResizeObserver(follow);
+		observer.observe(scroller);
+		observer.observe(content);
+		return () => observer.disconnect();
+	});
+
+	$effect(() => {
 		const total = start + entries.length;
 		if ((total > end && entries.at(-1)?.kind === 'user') || queued.length > waiting) {
 			pinned = true;
@@ -83,7 +87,7 @@
 		waiting = queued.length;
 
 		if (pinned) {
-			scroller.scrollTop = scroller.scrollHeight;
+			follow();
 		} else if (anchor !== null) {
 			scroller.scrollTop = scroller.scrollHeight - anchor;
 		}
@@ -104,6 +108,10 @@
 		} finally {
 			loading = false;
 		}
+	}
+
+	function follow() {
+		if (pinned) scroller.scrollTop = scroller.scrollHeight;
 	}
 
 	function scrolled() {
@@ -136,6 +144,7 @@
 <div class="flex-1 overflow-y-auto" bind:this={scroller} onscroll={scrolled}>
 	<div
 		class={['mx-auto flex max-w-chat flex-col gap-2.5 pb-3', dense ? 'px-2 pt-2' : 'px-6 pt-6']}
+		bind:this={content}
 	>
 		{#if start > 0}
 			<div class="flex justify-center"><Spinner size={14} kind="simmer" /></div>

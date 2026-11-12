@@ -28,7 +28,7 @@
 
 	--tracking-label: 0.44px;
 
-	--container-chat: 820px;
+	--container-chat: clamp(820px, 80%, 1120px);
 
 	--shadow-overlay: 0 4px 16px 2px rgb(0 0 0 / 50%);
 }
