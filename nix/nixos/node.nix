@@ -7,14 +7,15 @@
 let
   cfg = config.services.tsoup-node;
 
-  defaultDirectory = "${cfg.dataDir}/workspace";
-  ownsAccount = cfg.user == "tsoup-node";
-
   mcpConfig = pkgs.writeText "tsoup-node-mcp.json" (builtins.toJSON cfg.mcpServers);
 in
 {
   options.services.tsoup-node = {
-    enable = lib.mkEnableOption "a tsoup node, which lets a tsoup server run sessions on this machine";
+    enable = lib.mkEnableOption ''
+      a tsoup node, which lets a tsoup server run sessions on this machine.
+      It runs as a user service of whoever logs into a graphical session, so sessions
+      can do anything that user can and see the session's environment
+    '';
 
     package = lib.mkOption {
       type = lib.types.package;
@@ -33,35 +34,23 @@ in
       description = "The name sessions know this machine by, defaults to its hostname.";
     };
 
-    user = lib.mkOption {
-      type = lib.types.str;
-      default = "tsoup-node";
-      example = "alice";
+    dataDir = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "%h/tsoup-node";
       description = ''
-        The user sessions run as, they can do anything this user can.
-        The default user is created for you, any other must already exist.
+        Where sessions are stored, defaults to `$XDG_DATA_HOME/tsoup-node`.
+        `%h` stands for the user's home directory.
       '';
     };
 
-    group = lib.mkOption {
-      type = lib.types.str;
-      default = if ownsAccount then "tsoup-node" else "users";
-      description = "The group sessions run as.";
-    };
-
-    dataDir = lib.mkOption {
-      type = lib.types.path;
-      default = "/var/lib/tsoup-node";
-      description = "Where sessions are stored.";
-    };
-
     directory = lib.mkOption {
-      type = lib.types.path;
-      default = defaultDirectory;
-      example = "/home/alice/projects";
+      type = lib.types.str;
+      default = "%h";
+      example = "%h/projects";
       description = ''
         The directory sessions work in, each of its folders is a place a session can start.
-        Any directory but the default must already exist.
+        It must already exist, `%h` stands for the user's home directory.
       '';
     };
 
@@ -95,34 +84,17 @@ in
   };
 
   config = lib.mkIf cfg.enable {
-    users.groups = lib.mkIf ownsAccount { tsoup-node = { }; };
-
-    users.users = lib.mkIf ownsAccount {
-      tsoup-node = {
-        isSystemUser = true;
-        group = cfg.group;
-        home = cfg.dataDir;
-      };
-    };
-
-    systemd.tmpfiles.settings.tsoup-node =
-      lib.genAttrs ([ cfg.dataDir ] ++ lib.optional (cfg.directory == defaultDirectory) cfg.directory)
-        (_: {
-          d = {
-            inherit (cfg) user group;
-            mode = "0700";
-          };
-        });
-
-    systemd.services.tsoup-node = {
+    systemd.user.services.tsoup-node = {
       description = "tsoup node";
-      wantedBy = [ "multi-user.target" ];
-      wants = [ "network-online.target" ];
-      after = [ "network-online.target" ];
+      wantedBy = [ "graphical-session.target" ];
+      partOf = [ "graphical-session.target" ];
+      after = [ "graphical-session.target" ];
+
+      unitConfig.ConditionUser = "!@system";
 
       path = cfg.extraPackages ++ [
         "/run/wrappers"
-        "/etc/profiles/per-user/${cfg.user}"
+        "/etc/profiles/per-user/%u"
         "/run/current-system/sw"
       ];
 
@@ -136,8 +108,6 @@ in
 
       serviceConfig = {
         ExecStart = lib.getExe cfg.package;
-        User = cfg.user;
-        Group = cfg.group;
         Restart = "on-failure";
 
         WorkingDirectory = cfg.directory;
