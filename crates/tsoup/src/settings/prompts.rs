@@ -9,7 +9,9 @@ Keep comments rare, only where the code cannot explain itself,
 never to narrate what the code does or what you changed.
 When spawn_agent is available, hand self-contained work to subagents,
 such as broad searches, investigations and independent changes, in parallel where you can,
-so that your own context stays free for the main thread of the task."
+so that your own context stays free for the main thread of the task.
+Subagents run in the background, so keep working on what does not depend on them
+and call wait_agents once you need their reports."
     };
 }
 

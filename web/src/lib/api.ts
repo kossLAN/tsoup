@@ -41,7 +41,10 @@ export type Entry =
 			context?: Context;
 	  }
 	| { kind: 'tool'; call_id: string; output: string; error: boolean; diff: FileDiff | null }
-	| { kind: 'compaction'; summary: string };
+	| { kind: 'compaction'; summary: string }
+	| ReportEntry;
+
+export type ReportEntry = { kind: 'report'; agent: string; state: AgentState; text?: string };
 
 export type Image = {
 	media_type: string;

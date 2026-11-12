@@ -6,6 +6,7 @@
 	import CompactionLine from './CompactionLine.svelte';
 	import Markdown from './Markdown.svelte';
 	import ReplyActions from './ReplyActions.svelte';
+	import ReportLine from './ReportLine.svelte';
 	import Spinner from './Spinner.svelte';
 	import ToolCallLine from './ToolCallLine.svelte';
 	import Working from './Working.svelte';
@@ -38,9 +39,22 @@
 		dense?: boolean;
 	} = $props();
 
+	const awaiting = $derived.by(() => {
+		if (!agents.some(({ state }) => state === 'running')) return false;
+		const last = entries.at(-1);
+		if (last?.kind === 'assistant' && !last.tool_calls.length) return true;
+		const reply = entries.findLast((entry) => entry.kind === 'assistant');
+		return (
+			reply?.kind === 'assistant' &&
+			reply.tool_calls.some(
+				(call) => call.function.name === 'wait_agents' && !results.has(call.id)
+			)
+		);
+	});
+
 	const activity = $derived.by(() => {
 		if (compacting) return 'Compacting';
-		if (!draft) return null;
+		if (!draft) return awaiting ? 'Waiting for agents' : null;
 		if (draft.tool) return `Preparing ${draft.tool}`;
 		if (draft.text) return 'Writing';
 		return 'Thinking';
@@ -182,6 +196,8 @@
 				{/if}
 			{:else if entry.kind === 'compaction'}
 				<CompactionLine summary={entry.summary} />
+			{:else if entry.kind === 'report'}
+				<ReportLine report={entry} {agents} />
 			{/if}
 		{/each}
 

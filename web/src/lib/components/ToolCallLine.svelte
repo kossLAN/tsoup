@@ -35,9 +35,10 @@
 		set_actions: ['setting actions', 'set actions'],
 		web_search: ['searching', 'searched'],
 		web_fetch: ['fetching', 'fetched'],
-		spawn_agent: ['running agent', 'ran agent'],
+		spawn_agent: ['starting agent', 'started agent'],
 		resume_agent: ['resuming agent', 'resumed agent'],
 		list_agents: ['listing agents', 'listed agents'],
+		wait_agents: ['waiting for agents', 'waited for agents'],
 		ask: ['asking', 'asked']
 	};
 
@@ -70,6 +71,11 @@
 
 	const agent = $derived(agents.find(({ id }) => id === args.agent));
 
+	const awaited = $derived.by(() => {
+		const ids = args.agents;
+		return Array.isArray(ids) ? agents.filter(({ id }) => ids.includes(id)) : [];
+	});
+
 	const target = $derived.by(() => {
 		if (typeof args.command === 'string') return args.command;
 		if (typeof args.path === 'string') return args.path;
@@ -78,6 +84,7 @@
 		if (typeof args.port === 'number') return `port ${args.port}`;
 		if (typeof args.name === 'string') return args.name;
 		if (agent) return agent.name;
+		if (awaited.length) return awaited.map(({ name }) => name).join(', ');
 		if (questions.length === 1) return questions[0];
 		if (questions.length) return `${questions.length} questions`;
 		return '';

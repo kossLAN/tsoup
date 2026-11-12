@@ -23,11 +23,15 @@ pub struct Arguments {
 
 impl<E: Workspace> Tool<E> for SpawnAgent {
     const NAME: &'static str = "spawn_agent";
-    const DESCRIPTION: &'static str = "Hand a task to a subagent and wait for its final report.
-The subagent works in the same workspace with the same tools.
+    const DESCRIPTION: &'static str =
+        "Start a subagent on a task in the background and return its id right away.
+The subagent works in the same workspace with the same tools while you keep working.
 Call it several times in one message to run subagents in parallel,
 for independent pieces of work or to keep long explorations out of your context.
-The report names the subagent's id, which resume_agent takes to continue its work.";
+Its final report arrives as a message when it finishes.
+To wait for reports instead of working alongside, call wait_agents, never poll list_agents.
+If you end your turn while subagents run, you wait for them and continue with their reports.
+resume_agent takes the id to continue the subagent's work.";
     const PARALLEL: bool = true;
 
     type Arguments = Arguments;
@@ -63,6 +67,6 @@ The report names the subagent's id, which resume_agent takes to continue its wor
             None => session.selection().await.model.or(settings.default_model),
         };
         let (id, stop) = session.spawn_agent(caller.id, name, model).await?;
-        caller.delegate(id, stop, prompt).await
+        Ok(caller.delegate(id, stop, prompt).await)
     }
 }

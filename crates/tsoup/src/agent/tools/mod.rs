@@ -11,10 +11,13 @@ mod set_actions;
 mod shell;
 mod show_preview;
 mod spawn_agent;
+mod wait_agents;
 mod web;
 mod web_fetch;
 mod web_search;
 mod write_file;
+
+use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use schemars::JsonSchema;
@@ -37,13 +40,15 @@ use self::set_actions::SetActions;
 use self::shell::Shell;
 use self::show_preview::ShowPreview;
 use self::spawn_agent::SpawnAgent;
+use self::wait_agents::WaitAgents;
 use self::web_fetch::WebFetch;
 use self::web_search::WebSearch;
 use self::write_file::WriteFile;
 use super::Agent;
+use super::subagents::Subagents;
 use crate::llm::{FunctionCall, ToolCall, ToolDefinition};
 use crate::node::Folder;
-use crate::session::{AgentState, Entry, Environment, FileDiff, Sandbox, Session, SessionError};
+use crate::session::{Environment, FileDiff, Sandbox, Session, SessionError};
 use crate::vm::VmError;
 use crate::workspace::{Workspace, WorkspaceError};
 
@@ -69,6 +74,8 @@ pub enum ToolError {
     DuplicateAction(String),
     #[error("{0} is not one of the models listed for spawn_agent")]
     UnknownModel(String),
+    #[error("{0} is not one of your subagents")]
+    NotSubagent(Uuid),
     #[error("requesting the page: {0}")]
     Http(#[from] reqwest::Error),
     #[error("{0} is not an http or https address")]
@@ -154,65 +161,22 @@ pub struct Scope {
 }
 
 pub struct Caller<'a> {
-    pub agent: &'a Agent,
-    pub session: &'a Session,
+    pub agent: &'a Arc<Agent>,
+    pub session: &'a Arc<Session>,
     pub id: Uuid,
     pub scope: Scope,
+    pub subagents: &'a Subagents,
 }
 
 impl Caller<'_> {
-    async fn delegate(
-        &self,
-        agent: Uuid,
-        stop: CancellationToken,
-        prompt: String,
-    ) -> Result<Outcome, ToolError> {
-        let session = self.session;
-
-        let run = async {
-            let prompt = Entry::User {
-                text: prompt,
-                images: Vec::new(),
-            };
-            session.push(agent, prompt).await?;
-            self.agent.run(session, agent, self.scope.depth + 1).await
-        };
-        let result = tokio::select! {
-            result = run => Some(result),
-            () = stop.cancelled() => None,
-        };
-
-        let (state, outcome) = match result {
-            Some(Ok(Some(report))) => (
-                AgentState::Finished,
-                Outcome::text(format!("agent {agent} reported:\n{report}")),
-            ),
-            Some(Ok(None)) => (
-                AgentState::Finished,
-                Outcome::text(format!("agent {agent} finished without a report")),
-            ),
-            Some(Err(error)) => (
-                AgentState::Failed,
-                Outcome {
-                    output: format!("agent {agent} failed: {error}"),
-                    error: true,
-                    diff: None,
-                },
-            ),
-            None => (
-                AgentState::Stopped,
-                Outcome {
-                    output: format!("the user stopped agent {agent}"),
-                    error: true,
-                    diff: None,
-                },
-            ),
-        };
-
-        let finished = session.finish_agent(agent, state).await;
-        session.settle(agent).await;
-        finished?;
-        Ok(outcome)
+    async fn delegate(&self, agent: Uuid, stop: CancellationToken, prompt: String) -> Outcome {
+        let depth = self.scope.depth + 1;
+        self.subagents
+            .start(self.agent, self.session, agent, stop, prompt, depth)
+            .await;
+        Outcome::text(format!(
+            "agent {agent} is running, its report arrives as a message when it finishes"
+        ))
     }
 }
 
@@ -364,6 +328,7 @@ impl Tools {
                 Box::new(SpawnAgent),
                 Box::new(ResumeAgent),
                 Box::new(ListAgents),
+                Box::new(WaitAgents),
                 Box::new(Ask),
                 Box::new(WebSearch(http.clone())),
                 Box::new(WebFetch(http.clone())),
@@ -376,6 +341,7 @@ impl Tools {
                 Box::new(SpawnAgent),
                 Box::new(ResumeAgent),
                 Box::new(ListAgents),
+                Box::new(WaitAgents),
                 Box::new(Ask),
                 Box::new(WebSearch(http.clone())),
                 Box::new(WebFetch(http)),

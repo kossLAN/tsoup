@@ -10,7 +10,7 @@ use std::sync::Arc;
 use std::{io, mem};
 
 use serde::Serialize;
-use tokio::sync::{Mutex, RwLock, broadcast, oneshot};
+use tokio::sync::{Mutex, Notify, RwLock, broadcast, oneshot};
 use tokio::task::JoinHandle;
 use tokio_util::sync::CancellationToken;
 use tsoup_proto::node::{StoredSession, valid_folder};
@@ -730,8 +730,17 @@ impl Session {
         }
 
         thread.steering.push(prompt);
+        thread.steered.notify_waiters();
         self.emit(thread.queued());
         Ok(())
+    }
+
+    pub async fn steered(&self, agent: Uuid) -> Result<Arc<Notify>, SessionError> {
+        Ok(Arc::clone(&self.data.lock().await.thread(agent)?.steered))
+    }
+
+    pub async fn has_steering(&self, agent: Uuid) -> Result<bool, SessionError> {
+        Ok(!self.data.lock().await.thread(agent)?.steering.is_empty())
     }
 
     pub async fn take_steering(&self, agent: Uuid) -> Result<Vec<Entry>, SessionError> {

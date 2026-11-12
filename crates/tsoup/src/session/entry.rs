@@ -33,6 +33,12 @@ pub enum Entry {
     Compaction {
         summary: String,
     },
+    Report {
+        agent: Uuid,
+        state: AgentState,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        text: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

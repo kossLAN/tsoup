@@ -1,6 +1,7 @@
 mod compact;
 mod conversation;
 mod prompt;
+mod subagents;
 mod tools;
 
 use std::collections::HashMap;
@@ -14,6 +15,7 @@ use tsoup_claude_code::Cli;
 use uuid::Uuid;
 
 use self::conversation::{context, conversation};
+use self::subagents::Subagents;
 use self::tools::{Caller, Scope, Tools};
 use crate::llm::{Effort, LlmError, Message, Model, Provider};
 use crate::session::{Context, Entry, Environment, Event, Session, SessionError};
@@ -157,8 +159,8 @@ impl Agent {
     }
 
     async fn run(
-        &self,
-        session: &Session,
+        self: &Arc<Self>,
+        session: &Arc<Session>,
         id: Uuid,
         depth: usize,
     ) -> Result<Option<String>, TurnError> {
@@ -206,20 +208,26 @@ impl Agent {
     }
 
     async fn drive(
-        &self,
-        session: &Session,
+        self: &Arc<Self>,
+        session: &Arc<Session>,
         id: Uuid,
         turn: &Turn,
     ) -> Result<Option<String>, TurnError> {
+        let subagents = Subagents::default();
         let caller = Caller {
             agent: self,
             session,
             id,
             scope: turn.scope,
+            subagents: &subagents,
         };
         let mut recovered = false;
 
         loop {
+            for report in subagents.finished().await {
+                session.push(id, report.into()).await?;
+            }
+
             for prompt in session.take_steering(id).await? {
                 session.push(id, prompt).await?;
             }
@@ -271,6 +279,11 @@ impl Agent {
                 .await?;
 
             if calls.is_empty() {
+                if subagents.busy().await {
+                    subagents.wait(session, id, &[]).await?;
+                    continue;
+                }
+
                 if session.rest(id).await? {
                     return Ok(text);
                 }

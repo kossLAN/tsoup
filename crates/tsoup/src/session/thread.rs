@@ -1,5 +1,7 @@
+use std::sync::Arc;
+
 use serde::Serialize;
-use tokio::sync::oneshot;
+use tokio::sync::{Notify, oneshot};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -19,6 +21,7 @@ pub struct Thread {
     pub steering: Vec<Entry>,
     pub active: bool,
     pub stop: CancellationToken,
+    pub steered: Arc<Notify>,
 }
 
 pub struct Pending {
@@ -34,6 +37,7 @@ impl Thread {
             steering: Vec::new(),
             active: false,
             stop: CancellationToken::new(),
+            steered: Arc::default(),
         }
     }
 

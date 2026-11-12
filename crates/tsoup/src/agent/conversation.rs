@@ -1,4 +1,5 @@
 use super::prompt;
+use super::subagents::describe;
 use crate::llm::Message;
 use crate::session::{Context, Entry};
 
@@ -40,6 +41,10 @@ pub fn conversation(system: &str, entries: &[Entry]) -> Vec<Message> {
             },
             Entry::Compaction { summary } => {
                 messages.push(Message::user(format!("{}\n\n{summary}", prompt::SUMMARY)));
+            },
+            Entry::Report { agent, state, text } => {
+                interrupt(&mut messages, &mut unanswered);
+                messages.push(Message::user(describe(*agent, *state, text.as_deref())));
             },
         }
     }

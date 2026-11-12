@@ -20,7 +20,8 @@ pub struct Arguments {
 impl<E: Workspace> Tool<E> for ResumeAgent {
     const NAME: &'static str = "resume_agent";
     const DESCRIPTION: &'static str =
-        "Restart one of your subagents with a follow-up task and wait for its new report.
+        "Restart one of your subagents in the background with a follow-up task.
+Its new report arrives as a message when it finishes, like spawn_agent's.
 The subagent keeps its conversation, so use it to continue, correct or retry earlier work
 instead of explaining everything again to a new subagent.
 It works on subagents that finished, failed or were stopped by the user.";
@@ -39,6 +40,6 @@ It works on subagents that finished, failed or were stopped by the user.";
         Arguments { agent, prompt }: Arguments,
     ) -> Result<Outcome, ToolError> {
         let stop = caller.session.resume_agent(caller.id, agent).await?;
-        caller.delegate(agent, stop, prompt).await
+        Ok(caller.delegate(agent, stop, prompt).await)
     }
 }
