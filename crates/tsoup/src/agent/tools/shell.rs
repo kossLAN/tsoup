@@ -29,7 +29,9 @@ pub struct Arguments {
 
 impl<E: Workspace> Tool<E> for Shell {
     const NAME: &'static str = "shell";
-    const DESCRIPTION: &'static str = "Run a shell command.";
+    const DESCRIPTION: &'static str = "Run a shell command with sh -c.
+Every command starts in the working directory, so never cd into it first,
+and a cd inside one command does not carry over to the next.";
 
     type Arguments = Arguments;
 
