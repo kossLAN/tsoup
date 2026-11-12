@@ -2,6 +2,7 @@
 	import type { AgentSummary } from '$lib/api';
 	import { CheckIcon, RobotIcon, StopIcon, WarningCircleIcon } from '$lib/icons';
 	import Spinner from './Spinner.svelte';
+	import TreeGuide from './TreeGuide.svelte';
 
 	let {
 		root,
@@ -24,24 +25,7 @@
 			class="nav-item h-6.5 w-full shrink-0 gap-1.5 px-1 text-left"
 			onclick={() => onselect(agent)}
 		>
-			{#each trail as open, level (level)}
-				<span
-					class={[
-						'ml-1.75 w-1.75 shrink-0 self-stretch',
-						open && 'border-l border-light'
-					]}
-				></span>
-			{/each}
-			<span
-				class={['ml-1.75 w-1.75 shrink-0 self-stretch', !last && 'border-l border-light']}
-			>
-				<span
-					class={[
-						'block h-1/2 border-b border-light',
-						last && 'rounded-bl-small border-l'
-					]}
-				></span>
-			</span>
+			<TreeGuide {trail} {last} />
 			<span class="status text-secondary">
 				{#if agent.state === 'running'}
 					<Spinner size={12} kind="stir" />

@@ -34,6 +34,7 @@
 	import MenuItem from './MenuItem.svelte';
 	import Spinner from './Spinner.svelte';
 	import Submenu from './Submenu.svelte';
+	import TreeGuide from './TreeGuide.svelte';
 	import Wordmark from './Wordmark.svelte';
 
 	type Editing = { kind: 'session' | 'folder'; id: string } | { kind: 'new' };
@@ -181,7 +182,7 @@
 	{/if}
 {/snippet}
 
-{#snippet row(session: SessionSummary)}
+{#snippet row(session: SessionSummary, last?: boolean)}
 	{@const active = menus[session.id] ?? false}
 	{@const status = session.busy
 		? 'Generating'
@@ -204,6 +205,9 @@
 				aria-checked={selected.has(session.id)}
 				onclick={() => toggle(session.id)}
 			>
+				{#if last !== undefined}
+					<TreeGuide {last} />
+				{/if}
 				<span
 					class={[
 						'inline-flex size-3.5 shrink-0 items-center justify-center rounded-small border',
@@ -217,6 +221,9 @@
 				<span class="flex-1 truncate">{session.title || 'New session'}</span>
 			</button>
 		{:else if renaming('session', session.id)}
+			{#if last !== undefined}
+				<span class="flex self-stretch pl-2.5"><TreeGuide {last} /></span>
+			{/if}
 			{@render field('Session name')}
 		{:else}
 			<a
@@ -224,6 +231,9 @@
 				href="/sessions/{session.id}"
 				draggable="false"
 			>
+				{#if last !== undefined}
+					<TreeGuide {last} />
+				{/if}
 				<span class="flex-1 truncate">{session.title || 'New session'}</span>
 				<span
 					class={[
@@ -373,7 +383,7 @@
 					{@const active = menus[group.id] ?? false}
 					{@const expanded = !folded.has(group.id)}
 					{@const current = members.some((session) => session.id === page.params.id)}
-					<div class="flex shrink-0 flex-col gap-0.5" {...dropzone(group.id)}>
+					<div class="flex shrink-0 flex-col" {...dropzone(group.id)}>
 						<div
 							class={[
 								'group nav-item pr-1',
@@ -388,7 +398,7 @@
 								{@render field('Folder name')}
 							{:else}
 								<button
-									class="flex min-w-0 flex-1 items-center gap-2 pr-1 pl-2.5 text-left leading-8"
+									class="flex min-w-0 flex-1 items-center gap-1.5 pr-1 pl-2.5 text-left leading-8"
 									aria-expanded={expanded}
 									onclick={() => fold(group.id)}
 								>
@@ -443,14 +453,14 @@
 							{/if}
 						</div>
 						{#if expanded}
-							<div
-								class="ml-4.25 flex flex-col gap-0.5 border-l border-light pl-1"
-								role="list"
-							>
-								{#each members as session (session.id)}
-									{@render row(session)}
+							<div class="flex flex-col" role="list">
+								{#each members as session, index (session.id)}
+									{@render row(session, index === members.length - 1)}
 								{:else}
-									<span class="px-2.5 text-label leading-7 text-secondary">
+									<span
+										class="flex h-7 items-center gap-1.5 pl-2.5 text-label text-secondary"
+									>
+										<TreeGuide last />
 										No sessions yet
 									</span>
 								{/each}
