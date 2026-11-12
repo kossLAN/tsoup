@@ -7,9 +7,9 @@ use tokio_util::sync::CancellationToken;
 use tsoup_proto::node::{self as protocol, Request, Response, StoredSession};
 use tsoup_proto::rpc::SILENCE;
 use tsoup_proto::{McpListing, McpTool, mcp, workspace};
+use tsoup_rpc::{Connection, RpcError};
 use uuid::Uuid;
 
-use crate::rpc::{Connection, RpcError};
 use crate::session::{Record, Sessions};
 
 #[derive(Debug, thiserror::Error)]

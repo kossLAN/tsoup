@@ -3,6 +3,8 @@ mod error;
 mod group;
 mod node;
 mod proxy;
+mod share;
+mod upgrade;
 mod web;
 
 use std::sync::Arc;
@@ -113,6 +115,7 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/api/sessions/{id}/vm", post(start_vm).delete(destroy_vm))
         .route("/api/sessions/{id}/actions", post(run_action))
+        .route("/api/share", get(share::mount))
         .route("/api/nodes/{name}", get(node::connect))
         .route("/api/nodes/{name}/folders", get(node::folders))
         .fallback(web::serve)

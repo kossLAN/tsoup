@@ -1,7 +1,9 @@
+mod binary;
 pub mod guest;
 pub mod mcp;
 pub mod node;
 pub mod rpc;
+pub mod share;
 pub mod workspace;
 
 use serde::{Deserialize, Serialize};

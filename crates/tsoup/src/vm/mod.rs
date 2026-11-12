@@ -13,11 +13,11 @@ use tokio::process::{Child, Command};
 use tokio::sync::{Mutex, watch};
 use tsoup_proto::guest::{Guest, Request, Response};
 use tsoup_proto::{McpFailure, McpListing, McpTool, mcp, workspace};
+use tsoup_rpc::{Connection, RpcError};
 
 use self::build::RUNNER_LINK;
 pub use self::build::{BuildError, Builder, describe};
 pub use self::preview::Preview;
-use crate::rpc::{Connection, RpcError};
 use crate::session::{EnvironmentStatus, Event, Events, WORKSPACE_DIR};
 
 const AGENT_SOCKET: &str = "agent.sock";

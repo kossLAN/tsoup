@@ -54,6 +54,23 @@ in
       '';
     };
 
+    mount = {
+      enable = lib.mkEnableOption ''
+        mounting the workspaces of the server's sandbox sessions on this machine,
+        one folder for each session
+      '';
+
+      directory = lib.mkOption {
+        type = lib.types.str;
+        default = "%h/tsoup";
+        example = "%h/sessions";
+        description = ''
+          Where the workspaces are mounted, it is created when missing.
+          `%h` stands for the user's home directory.
+        '';
+      };
+    };
+
     mcpServers = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
@@ -103,6 +120,7 @@ in
         TSOUP_NODE_NAME = cfg.name;
         TSOUP_NODE_DIRECTORY = cfg.directory;
         TSOUP_NODE_DATA_DIR = cfg.dataDir;
+        TSOUP_NODE_MOUNT = lib.mkIf cfg.mount.enable cfg.mount.directory;
         TSOUP_NODE_MCP_CONFIG = lib.mkIf (cfg.mcpServers != { }) mcpConfig;
       };
 

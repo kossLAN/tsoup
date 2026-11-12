@@ -1,6 +1,5 @@
 pub mod files;
 pub mod mcp;
-pub mod rpc;
 pub mod shell;
 
 use std::io;

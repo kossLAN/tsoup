@@ -12,8 +12,8 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{Mutex, OnceCell};
 use tracing_subscriber::EnvFilter;
 use tsoup_proto::guest::{Guest, PORT, Request, Response, WORKSPACE};
+use tsoup_rpc::Handler;
 use tsoup_workspace::mcp::Mcp;
-use tsoup_workspace::rpc::{self, Handler};
 
 const MCP_CONFIG: &str = "/etc/tsoup/mcp.json";
 
@@ -43,7 +43,7 @@ async fn run() -> anyhow::Result<()> {
         .await?;
     let host = tokio::io::join(port.try_clone().await?, port);
 
-    rpc::serve(host, Arc::new(Agent::default())).await
+    tsoup_rpc::serve(host, Arc::new(Agent::default())).await
 }
 
 #[derive(Default)]

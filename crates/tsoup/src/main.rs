@@ -3,9 +3,9 @@ mod analytics;
 mod api;
 mod llm;
 mod node;
-mod rpc;
 mod session;
 mod settings;
+mod share;
 mod vm;
 mod workspace;
 
@@ -17,6 +17,7 @@ use std::process::ExitCode;
 use std::sync::Arc;
 
 use anyhow::Context as _;
+use axum::serve::ListenerExt as _;
 use clap::Parser;
 use tokio::net::TcpListener;
 use tokio::signal::unix::{SignalKind, signal};
@@ -152,6 +153,11 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
         .await
         .with_context(|| format!("listening on {}:{}", cli.hostname, cli.port))?;
     let address = listener.local_addr()?;
+    let listener = listener.tap_io(|stream| {
+        if let Err(error) = stream.set_nodelay(true) {
+            tracing::warn!(%error, "disabling Nagle's algorithm on a connection");
+        }
+    });
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
     tracing::info!(%address, "serving the API");

@@ -1,0 +1,19 @@
+[package]
+name = "tsoup-rpc"
+description = "The calling and handling ends of the RPC connections between the tsoup server, its guest agent and its nodes"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+tsoup-proto.workspace = true
+
+anyhow.workspace = true
+futures-util.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tokio-util.workspace = true
+tracing.workspace = true

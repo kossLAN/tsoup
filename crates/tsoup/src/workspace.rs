@@ -8,9 +8,9 @@ use serde_json::{Map, Value};
 use tsoup_proto::guest::WORKSPACE;
 use tsoup_proto::workspace::{Request, Response};
 use tsoup_proto::{Exit, McpOutput, McpTool, mcp};
+use tsoup_rpc::RpcError;
 
 use crate::node::{Folder, NodeError};
-use crate::rpc::RpcError;
 use crate::session::Sandbox;
 use crate::vm::VmError;
 

@@ -10,22 +10,28 @@ rust-version = "1.88"
 [workspace.dependencies]
 tsoup-claude-code = { path = "crates/claude-code" }
 tsoup-proto = { path = "crates/proto" }
+tsoup-rpc = { path = "crates/rpc" }
 tsoup-workspace = { path = "crates/workspace" }
 
 anyhow = "1.0.104"
 axum = "0.8.9"
+base64 = "0.23.1"
 bytes = "1.12.1"
+cap-fs-ext = "4.0.3"
 cap-std = "4.0.3"
 clap = { version = "4.6.7", features = ["derive", "env"] }
+fuser = "0.18.0"
 futures-util = { version = "0.3.34", features = ["sink"] }
 gethostname = "1.1.0"
 hyper = { version = "1.12.0", features = ["client", "http1"] }
 hyper-util = { version = "0.1.21", features = ["tokio"] }
+libc = "0.2.191"
 rmcp = { version = "3.8.0", default-features = false, features = [
   "client",
   "transport-child-process",
 ] }
 reqwest = { version = "0.13.5", default-features = false, features = ["json", "rustls"] }
+rustix = { version = "1.1.6", features = ["fs"] }
 rust-embed = { version = "8.13.0", features = [
   "deterministic-timestamps",
   "interpolate-folder-path",

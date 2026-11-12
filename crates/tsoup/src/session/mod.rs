@@ -6,7 +6,7 @@ mod thread;
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, HashMap};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::{io, mem};
 
@@ -74,6 +74,12 @@ pub struct SessionSummary {
     pub busy: bool,
     pub group: Option<Uuid>,
     pub environment: EnvironmentStatus,
+}
+
+pub struct Workspace {
+    pub id: Uuid,
+    pub title: String,
+    pub path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -393,6 +399,27 @@ impl Sessions {
             nodes: summaries(&*self.nodes.read().await),
         };
         (snapshot, receiver)
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub async fn workspaces(&self) -> Vec<Workspace> {
+        let sessions: Vec<_> = self.by_id.read().await.values().cloned().collect();
+        let mut workspaces = Vec::new();
+
+        for session in sessions {
+            if let Environment::Sandbox(sandbox) = &session.environment {
+                workspaces.push(Workspace {
+                    id: session.id,
+                    title: session.data.lock().await.title.clone(),
+                    path: sandbox.workspace(),
+                });
+            }
+        }
+
+        workspaces
     }
 
     pub async fn get(&self, id: Uuid) -> Result<Arc<Session>, SessionError> {

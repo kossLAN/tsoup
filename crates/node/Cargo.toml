@@ -10,11 +10,14 @@ workspace = true
 
 [dependencies]
 tsoup-proto.workspace = true
+tsoup-rpc.workspace = true
 tsoup-workspace.workspace = true
 
 anyhow.workspace = true
 clap.workspace = true
+fuser.workspace = true
 gethostname.workspace = true
+libc.workspace = true
 reqwest.workspace = true
 serde.workspace = true
 serde_json.workspace = true

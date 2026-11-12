@@ -1,6 +1,6 @@
 [package]
 name = "tsoup-workspace"
-description = "The workspace agent shared by the tsoup guest and nodes: shell commands, files, MCP servers and the RPC loop"
+description = "The workspace agent shared by the tsoup guest and nodes: shell commands, files and MCP servers"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -11,12 +11,9 @@ workspace = true
 [dependencies]
 tsoup-proto.workspace = true
 
-anyhow.workspace = true
-futures-util.workspace = true
 rmcp.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
-tokio-util.workspace = true
 tracing.workspace = true

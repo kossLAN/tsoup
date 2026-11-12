@@ -11,15 +11,18 @@ workspace = true
 [dependencies]
 tsoup-claude-code.workspace = true
 tsoup-proto.workspace = true
+tsoup-rpc.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true
+cap-fs-ext.workspace = true
 cap-std.workspace = true
 clap.workspace = true
 futures-util.workspace = true
 hyper.workspace = true
 hyper-util.workspace = true
 reqwest.workspace = true
+rustix.workspace = true
 rust-embed.workspace = true
 schemars.workspace = true
 scraper.workspace = true

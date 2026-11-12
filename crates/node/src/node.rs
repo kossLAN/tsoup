@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::ensure;
 use tsoup_proto::node::{self as protocol, Request, Response, valid_folder};
+use tsoup_rpc::Handler;
 use tsoup_workspace::mcp::Mcp;
-use tsoup_workspace::rpc::Handler;
 
 use crate::store::Store;
 
