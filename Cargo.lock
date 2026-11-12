@@ -2536,6 +2536,7 @@ dependencies = [
  "tsoup-claude-code",
  "tsoup-proto",
  "tsoup-rpc",
+ "tsoup-workspace",
  "uuid",
 ]
 
@@ -2614,6 +2615,7 @@ dependencies = [
 name = "tsoup-workspace"
 version = "0.1.0"
 dependencies = [
+ "cap-std",
  "rmcp",
  "serde",
  "serde_json",

@@ -71,6 +71,12 @@ in
       };
     };
 
+    sandbox.enable = lib.mkEnableOption ''
+      confining sessions with bubblewrap, so that their commands and file tools only reach
+      the folder of the session, the system's programs and a home directory and `/tmp` kept
+      for that folder under the data directory. The MCP servers stay outside the sandbox
+    '';
+
     mcpServers = lib.mkOption {
       type = lib.types.attrsOf (
         lib.types.submodule {
@@ -109,11 +115,14 @@ in
 
       unitConfig.ConditionUser = "!@system";
 
-      path = cfg.extraPackages ++ [
-        "/run/wrappers"
-        "/etc/profiles/per-user/%u"
-        "/run/current-system/sw"
-      ];
+      path =
+        cfg.extraPackages
+        ++ lib.optional cfg.sandbox.enable pkgs.bubblewrap
+        ++ [
+          "/run/wrappers"
+          "/etc/profiles/per-user/%u"
+          "/run/current-system/sw"
+        ];
 
       environment = {
         TSOUP_SERVER = cfg.server;
@@ -121,6 +130,7 @@ in
         TSOUP_NODE_DIRECTORY = cfg.directory;
         TSOUP_NODE_DATA_DIR = cfg.dataDir;
         TSOUP_NODE_MOUNT = lib.mkIf cfg.mount.enable cfg.mount.directory;
+        TSOUP_NODE_SANDBOX = lib.mkIf cfg.sandbox.enable "true";
         TSOUP_NODE_MCP_CONFIG = lib.mkIf (cfg.mcpServers != { }) mcpConfig;
       };
 

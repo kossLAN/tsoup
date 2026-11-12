@@ -29,6 +29,7 @@ pub struct NodeSummary {
 pub struct Node {
     pub name: String,
     pub directory: String,
+    pub sandboxed: bool,
     pub tools: Vec<McpTool>,
     connection: Connection<protocol::Node>,
 }
@@ -51,6 +52,7 @@ impl Node {
     ) -> Result<(Self, Vec<StoredSession>), NodeError> {
         let Response::Hello {
             directory,
+            sandboxed,
             sessions,
         } = connection.request(Request::Hello).await?
         else {
@@ -67,6 +69,7 @@ impl Node {
         let node = Self {
             name,
             directory,
+            sandboxed,
             tools,
             connection,
         };

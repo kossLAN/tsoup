@@ -6,8 +6,8 @@ use std::time::Duration;
 use tokio::process::Command;
 use tsoup_proto::{Exit, MAX_OUTPUT};
 
-pub async fn exec(command: &str, dir: &Path, timeout: Duration) -> io::Result<Option<Exit>> {
-    let output = shell(command, dir).kill_on_drop(true).output();
+pub async fn exec(mut shell: Command, timeout: Duration) -> io::Result<Option<Exit>> {
+    let output = shell.kill_on_drop(true).output();
 
     let Ok(output) = tokio::time::timeout(timeout, output).await else {
         return Ok(None);
@@ -21,8 +21,8 @@ pub async fn exec(command: &str, dir: &Path, timeout: Duration) -> io::Result<Op
     }))
 }
 
-pub fn spawn(command: &str, dir: &Path) -> io::Result<()> {
-    shell(command, dir)
+pub fn spawn(mut shell: Command) -> io::Result<()> {
+    shell
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .process_group(0)
@@ -30,7 +30,7 @@ pub fn spawn(command: &str, dir: &Path) -> io::Result<()> {
     Ok(())
 }
 
-fn shell(command: &str, dir: &Path) -> Command {
+pub fn sh(command: &str, dir: &Path) -> Command {
     let mut shell = Command::new("sh");
     shell
         .arg("-c")

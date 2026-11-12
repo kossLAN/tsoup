@@ -5,6 +5,7 @@ use anyhow::ensure;
 use tsoup_proto::node::{self as protocol, Request, Response, valid_folder};
 use tsoup_rpc::Handler;
 use tsoup_workspace::mcp::Mcp;
+use tsoup_workspace::sandbox::Sandbox;
 
 use crate::store::Store;
 
@@ -12,10 +13,16 @@ pub struct Node {
     directory: PathBuf,
     store: Store,
     mcp: Mcp,
+    sandbox: Option<Sandbox>,
 }
 
 impl Node {
-    pub async fn start(directory: PathBuf, store: Store, mcp_config: Option<&Path>) -> Self {
+    pub async fn start(
+        directory: PathBuf,
+        store: Store,
+        mcp_config: Option<&Path>,
+        sandbox: Option<Sandbox>,
+    ) -> Self {
         let mcp = match mcp_config {
             Some(config) => Mcp::start(config, &directory).await,
             None => Mcp::default(),
@@ -25,6 +32,7 @@ impl Node {
             directory,
             store,
             mcp,
+            sandbox,
         }
     }
 
@@ -60,6 +68,7 @@ impl Handler for Node {
         Ok(match request {
             Request::Hello => Response::Hello {
                 directory: self.directory.display().to_string(),
+                sandboxed: self.sandbox.is_some(),
                 sessions: self.store.list().await?,
             },
             Request::Folders => Response::Folders {
@@ -82,7 +91,9 @@ impl Handler for Node {
                 Response::Done
             },
             Request::Workspace { folder, request } => {
-                Response::Workspace(tsoup_workspace::run(&self.folder(&folder)?, request).await?)
+                let dir = self.folder(&folder)?;
+                let sandbox = self.sandbox.as_ref();
+                Response::Workspace(tsoup_workspace::run(&dir, sandbox, request).await?)
             },
             Request::Mcp(request) => Response::Mcp(self.mcp.handle(request).await?),
         })

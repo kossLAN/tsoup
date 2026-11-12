@@ -15,6 +15,7 @@ use reqwest::Url;
 use tokio::signal::unix::{SignalKind, signal};
 use tracing_subscriber::EnvFilter;
 use tsoup_proto::node::PROTOCOL;
+use tsoup_workspace::sandbox::Sandbox;
 
 use self::node::Node;
 use self::store::Store;
@@ -71,6 +72,13 @@ struct Cli {
         help = "Mount the workspaces of the server's sandbox sessions at this directory"
     )]
     mount: Option<PathBuf>,
+
+    #[arg(
+        long,
+        env = "TSOUP_NODE_SANDBOX",
+        help = "Confine each session to its folder with bubblewrap"
+    )]
+    sandbox: bool,
 }
 
 #[tokio::main]
@@ -113,7 +121,10 @@ async fn run(cli: Cli) -> anyhow::Result<()> {
     let share = endpoint(&cli.server, &["api", "share"])?;
 
     tracing::info!(name, directory = %directory.display(), "starting the node");
-    let node = Arc::new(Node::start(directory, store, cli.mcp_config.as_deref()).await);
+    let sandbox = cli
+        .sandbox
+        .then(|| Sandbox::new(data_dir.join("sandboxes")));
+    let node = Arc::new(Node::start(directory, store, cli.mcp_config.as_deref(), sandbox).await);
     let mut interrupt = signal(SignalKind::interrupt())?;
     let mut terminate = signal(SignalKind::terminate())?;
 

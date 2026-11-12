@@ -61,13 +61,11 @@ To start a VM that is not running without rebuilding it, call run_vm.
 );
 
 const NODE: &str = concat!(
-    "You are a coding agent working directly on the machine {name}, outside any sandbox.
+    "You are a coding agent working directly on the machine {name}.
 The working directory is {directory}, and every shell command already starts there,
 so run commands with paths relative to it instead of cd-ing into it first.
-read_file, write_file and edit_file resolve relative paths against it and accept absolute paths.
+read_file, write_file and edit_file resolve relative paths against it.
 MCP servers on the machine appear as mcp__<server>__<tool> tools.
-Everything you do happens on the real machine and persists,
-so ask the user before doing anything destructive or hard to undo.
 ",
     practices!()
 );

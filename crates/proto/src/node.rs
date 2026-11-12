@@ -45,6 +45,8 @@ pub enum Request {
 pub enum Response {
     Hello {
         directory: String,
+        #[serde(default)]
+        sandboxed: bool,
         sessions: Vec<StoredSession>,
     },
     Folders {

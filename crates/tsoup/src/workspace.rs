@@ -1,14 +1,13 @@
 use std::future;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
-use cap_std::ambient_authority;
-use cap_std::fs::Dir;
 use serde_json::{Map, Value};
 use tsoup_proto::guest::WORKSPACE;
 use tsoup_proto::workspace::{Request, Response};
 use tsoup_proto::{Exit, McpOutput, McpTool, mcp};
 use tsoup_rpc::RpcError;
+use tsoup_workspace::files;
 
 use crate::node::{Folder, NodeError};
 use crate::session::Sandbox;
@@ -123,10 +122,10 @@ impl Workspace for Sandbox {
     async fn run(&self, request: Request) -> Result<Response, WorkspaceError> {
         match request {
             Request::Read { path } => Ok(Response::File {
-                content: read(self.workspace(), path).await?,
+                content: files::read_within(&self.workspace(), relative(&path)).await?,
             }),
             Request::Write { path, content } => {
-                write(self.workspace(), path, content).await?;
+                files::write_within(&self.workspace(), relative(&path), content).await?;
                 Ok(Response::Done)
             },
             request => Ok(self.vm.workspace(request).await?),
@@ -154,48 +153,6 @@ impl Workspace for Folder {
     fn mcp_tools(&self) -> impl Future<Output = Vec<McpTool>> + Send {
         future::ready(self.node.tools.clone())
     }
-}
-
-async fn read(workspace: PathBuf, path: String) -> io::Result<Option<String>> {
-    blocking(
-        move || match open(&workspace)?.read_to_string(relative(&path)) {
-            Ok(content) => Ok(Some(content)),
-            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(error) => Err(error),
-        },
-    )
-    .await
-}
-
-async fn write(workspace: PathBuf, path: String, content: String) -> io::Result<()> {
-    blocking(move || {
-        let dir = open(&workspace)?;
-        let file = relative(&path);
-
-        if let Some(parent) = file
-            .parent()
-            .filter(|parent| !parent.as_os_str().is_empty())
-        {
-            dir.create_dir_all(parent)?;
-        }
-
-        dir.write(file, content)
-    })
-    .await
-}
-
-async fn blocking<T, F>(work: F) -> io::Result<T>
-where
-    F: FnOnce() -> io::Result<T> + Send + 'static,
-    T: Send + 'static,
-{
-    tokio::task::spawn_blocking(work)
-        .await
-        .map_err(io::Error::other)?
-}
-
-fn open(workspace: &Path) -> io::Result<Dir> {
-    Dir::open_ambient_dir(workspace, ambient_authority())
 }
 
 fn relative(path: &str) -> &Path {

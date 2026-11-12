@@ -12,6 +12,7 @@ workspace = true
 tsoup-claude-code.workspace = true
 tsoup-proto.workspace = true
 tsoup-rpc.workspace = true
+tsoup-workspace.workspace = true
 
 anyhow.workspace = true
 axum.workspace = true

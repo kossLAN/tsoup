@@ -57,9 +57,9 @@ impl Handler for Agent {
 
     async fn handle(&self, request: Request) -> anyhow::Result<Response> {
         Ok(match request {
-            Request::Workspace(request) => {
-                Response::Workspace(tsoup_workspace::run(Path::new(WORKSPACE), request).await?)
-            },
+            Request::Workspace(request) => Response::Workspace(
+                tsoup_workspace::run(Path::new(WORKSPACE), None, request).await?,
+            ),
             Request::Mcp(request) => Response::Mcp(self.mcp().await.handle(request).await?),
             Request::Forward {
                 from,

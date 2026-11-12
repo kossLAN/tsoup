@@ -23,8 +23,26 @@ pub fn sandbox(prompt: &str, modules: &str) -> String {
     }
 }
 
+const UNCONFINED: &str = "Nothing confines you on the machine:
+read_file, write_file and edit_file also accept absolute paths,
+and everything you do happens on the real machine and persists,
+so ask the user before doing anything destructive or hard to undo.";
+
+const CONFINED: &str = "A sandbox confines you to {directory}:
+shell commands see that directory, the system's programs and a home directory and /tmp of their own,
+and nothing else on the machine exists for them.
+read_file, write_file and edit_file work inside {directory} only.
+What you do there happens on the real machine and persists,
+so ask the user before doing anything destructive or hard to undo.";
+
 pub fn node(prompt: &str, folder: &Folder) -> String {
-    prompt
+    let access = if folder.node.sandboxed {
+        CONFINED
+    } else {
+        UNCONFINED
+    };
+
+    format!("{prompt}\n\n{access}")
         .replace("{name}", &folder.node.name)
         .replace("{directory}", &folder.path().display().to_string())
 }
